@@ -144,6 +144,14 @@ class oversetRegion
             mutable indexedOctree<treeDataCell>* cellSearchPtr_;
 
 
+            // Data for optimizing parallel comms
+
+                //- List of bounding boxes for each region on each processor,
+                //  e.g. procBoundBoxes[3] contains a list of bounding boxes of
+                //  all regions on processor 3.
+                mutable List<List<boundBox> >* procBoundBoxesPtr_;
+
+
         //- Donor fill-in.  One in donorFraction cells is expected to be
         //  a donor
         static const debug::optimisationSwitch donorFraction;
@@ -181,6 +189,9 @@ class oversetRegion
 
         //- Calculate cell octree
         void calcCellSearch() const;
+
+        //- Calculate bounding boxes on all processors
+        void calcProcBoundBoxes() const;
 
         //- Clear all data
         void clearOut() const;
@@ -245,14 +256,17 @@ public:
                 return mesh_.cellZones()[zoneIndex()];
             }
 
+            //- Return region cell labels (implemented in terms of zone())
+            const labelList& regionCells() const
+            {
+                return zone();
+            }
+
             //- Return list of donor region indices
             const labelList& donorRegions() const;
 
             //- Return list of acceptor region indices
             const labelList& acceptorRegions() const;
-
-            //- Return region cell labels
-            const labelList& regionCells() const;
 
 
         // Donor-acceptor addressing
@@ -293,6 +307,16 @@ public:
             //- Return cell octree for search in local region
             //  Only eligible donors are added to the list
             const indexedOctree<treeDataCell>& cellSearch() const;
+
+
+            // Function for avoiding unnecessary parallel comms overheads
+
+                //- Return list of region bounding boxes for each processor.
+                //  Used to optimize out parallel comms since there is no need
+                //  to send the acceptor data to a certain processor if the
+                //  bounding box of the donor region on a given processor does
+                //  not contain acceptor point
+                const List<List<boundBox> >& procBoundBoxes() const;
 
 
         //- Update for topo change or mesh motion

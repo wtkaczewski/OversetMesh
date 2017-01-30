@@ -1121,9 +1121,7 @@ void Foam::oversetRegion::calcCellSearch() const
     // Create the octree search for this region.  It will be used by other
     // regions when searching for donor cells
 
-    // Reconsider search boxes: only capture local cells
-//     treeBoundBox overallBb(mesh_.points(), false);
-    //HJ Testing
+    // Bounding box containing only local region cells
     treeBoundBox overallBb(localBounds());
     Random rndGen(123456);
     overallBb = overallBb.extend(rndGen, 1E-4);
@@ -1147,6 +1145,40 @@ void Foam::oversetRegion::calcCellSearch() const
 }
 
 
+void Foam::oversetRegion::calcProcBoundBoxes() const
+{
+    if (procBoundBoxesPtr_)
+    {
+        FatalErrorIn("void oversetRegion::calcProcBoundBoxes() const")
+            << "Processor bounding boxes already calculated"
+            << abort(FatalError);
+    }
+
+    // Create the list
+    procBoundBoxesPtr_ = new List<List<boundBox> >(Pstream::nProcs());
+    List<List<boundBox> >& procBoundBoxes = *procBoundBoxesPtr_;
+
+    // Get pointer list of bounding boxes for this processor
+    List<boundBox>& localBoundBoxes = procBoundBoxes[Pstream::myProcNo()];
+
+    // Get all regions that are present on this processor
+    const PtrList<oversetRegion>& regions = oversetMesh_.regions();
+
+    // Set the size for this processor
+    localBoundBoxes.setSize(regions.size());
+
+    // Loop through overset regions and populate the list
+    forAll (regions, orI)
+    {
+        localBoundBoxes[orI] = regions[orI].localBounds();
+    }
+
+    // Now that each processor has filled in its own part, combine the data
+    Pstream::gatherList(procBoundBoxes);
+    Pstream::scatterList(procBoundBoxes);
+}
+
+
 void Foam::oversetRegion::clearOut() const
 {
     deleteDemandDrivenData(donorRegionsPtr_);
@@ -1163,6 +1195,8 @@ void Foam::oversetRegion::clearOut() const
     deleteDemandDrivenData(localBoundsPtr_);
     deleteDemandDrivenData(globalBoundsPtr_);
     deleteDemandDrivenData(cellSearchPtr_);
+
+    deleteDemandDrivenData(procBoundBoxesPtr_);
 }
 
 
@@ -1236,12 +1270,6 @@ Foam::oversetRegion::~oversetRegion()
 
 
 // * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * * //
-
-const Foam::labelList& Foam::oversetRegion::regionCells() const
-{
-    return mesh_.cellZones()[zoneIndex_];
-}
-
 
 const Foam::labelList& Foam::oversetRegion::donorRegions() const
 {
@@ -1371,6 +1399,18 @@ Foam::oversetRegion::cellSearch() const
     }
 
     return *cellSearchPtr_;
+}
+
+
+const Foam::List<Foam::List<Foam::boundBox> >&
+Foam::oversetRegion::procBoundBoxes() const
+{
+    if (!procBoundBoxesPtr_)
+    {
+        calcProcBoundBoxes();
+    }
+
+    return *procBoundBoxesPtr_;
 }
 
 
