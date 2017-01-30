@@ -147,8 +147,8 @@ class oversetRegion
             // Data for optimizing parallel comms
 
                 //- List of bounding boxes for each region on each processor,
-                //  e.g. procBoundBoxes[3] contains a list of bounding boxes of
-                //  all regions on processor 3.
+                //  e.g. procBoundBoxes[3][2] contains a bounding box of region
+                //  2 on processor 3
                 mutable List<List<boundBox> >* procBoundBoxesPtr_;
 
 

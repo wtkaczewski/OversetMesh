@@ -66,6 +66,19 @@ void Foam::oversetRegion::calcDonorRegions() const
         // Get name to search for
         const word& curName = donorRegionNames_[drI];
 
+        // If the donor region name is the same as the name of this region,
+        // issue an error
+        if (name_ == curName)
+        {
+            FatalErrorIn
+            (
+                "void oversetRegion::calcDonorRegions() const"
+            )   << "Region " << name_ << " specified as the donor "
+                << "of itself.  List of donor regions: " << donorRegionNames_ << nl
+                << "This is not allowed: check oversetMesh definition"
+                << abort(FatalError);
+        }
+
         // Find donor region name
         forAll (regions, orI)
         {
@@ -141,8 +154,252 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
     {
         FatalErrorIn("void oversetRegion::calcDonorAcceptorCells() const")
             << "Donor cells already calculated"
+
             << abort(FatalError);
     }
+
+    // Algorithm (operates on acceptor cells):
+    // 1) Start iteration process by getting current set of acceptors from
+    //    oversetFringe
+    //
+    // 2) We need to calculate the sending map for acceptors, which tells me
+    //    which acceptors points I need to send to which processor:
+    //    - Loop through acceptors for this region and through all donor regions
+    //    - Using the processor bounding boxes, figure out where to send this
+    //      acceptor (there is no need to send the acceptor if the acceptor
+    //      point falls outside the donor region of a certain processor). For
+    //      each processor, simply insert the acceptor index that needs sending
+    //      into the DynamicList
+    //    - While looping through acceptors, count how many acceptors I'm
+    //      sending to each processor
+    // 3) Count how many acceptor points my (local) processor is going to be
+    //    receiving from all other processors
+    // 4) Create a constructing map, organized as follows:
+    //    - If processor N sends me M acceptor points, these points will be
+    //      stored in the receiving list from indices K to K + M - 1, where K
+    //      is the total number of acceptor points received from previous
+    //      processors (processors I, where I < N)
+    // 5) Create mapDistribute object and distribute acceptor points
+    //
+    // 6) Find donors for received acceptors
+    //
+    // 5) Update eligible donors (eligible donors are cells that are neither
+    //    acceptors nor holes)
+    // 6) Create oversetCommunicator object using the sending map and:
+    //    - Send necessary acceptor data
+    //    - Perform donor search
+    //    - Receive donors coming from multiple processors (with different
+    //      values of Donor Suitability Function, see oversetFringe)
+    // 7) Update donor/acceptor pairs for this region, resolving multiple hits
+    //    based on Donor Suitability Function
+    // 8) Update acceptors in oversetFringe, which takes care of iteration
+    //    process (if necessary)
+    // 9) Go to 1) until oversetFringe decides it is time to stop
+
+    // Get necessary data that does not depend on (possible) iteration process
+
+    // Get mesh data
+    const vectorField& cc = mesh_.cellCentres();
+
+    // Get donor regions
+    const labelList& dr = donorRegions();
+
+    // Get region bounding boxes for all processors and regions: used to decide
+    // where we need to send the data (i.e. it does not make sense to send
+    // acceptor data to a processor if the acceptor point does not lie within
+    // the bounding box of a given processor donor region)
+    const List<List<boundBox> >& procRegionBB = procBoundBoxes();
+       
+    // STAGE 1: Start iteration process
+
+    do
+    {
+        // Get current and local acceptor cells from oversetFringe
+        const labelList& a = fringePtr_->curAcceptors();
+
+        // Gather acceptor cell centres in a single list
+        List<point> accCellCentres(a.size());
+        forAll (accCellCentres, aI)
+        {
+            accCellCentres[aI] = cc[a[aI]];
+        }
+
+        // Create list containing number of acceptors my processor is sending to
+        // other processors.
+        // Example: nAcceptorsToProcessorMap[2][5] = 123 will (after collection
+        // of data) mean that processor 2 sends 123 acceptor points to processor
+        // 5. Note that for a serial run, this list is completely unnecessary,
+        // but I prefer writing this in a general way, where I don't care about
+        // minor loss of efficiency for serial runs. VV, 30/Jan/2016.
+        labelListList nAcceptorsToProcessorMap(Pstream::nProcs());
+
+        forAll (nAcceptorsToProcessorMap, procI)
+        {
+            nAcceptorsToProcessorMap[procI].setSize(Pstream::nProcs(), 0);
+        }
+
+        // Get number of acceptors I'm sending to other processors
+        labelList& numberOfLocalAcceptorsToProcs =
+            nAcceptorsToProcessorMap[Pstream::myProcNo()];
+
+        // STAGE 2: Calculate the sending map
+
+        // Example: sendMap[procI] = (0 1 5 7 89 ...) tells us that I should
+        // send field values (acceptor points in this case) indexed by: 0, 1, 5,
+        // 7, 89... to processor procI
+
+        // Initialize sending map: for each processor, create a DynamicList of
+        // acceptors that need to be send to that processor
+        List<dynamicLabelList>& sendMap(Pstream::nProcs());
+
+        // Allocate enough storage as if we are sending all acceptors to all
+        // processors (trading off memory for performance)
+        forAll (sendMap, procI)
+        {
+            sendMap[procI].setCapacity(a.size());
+        }
+
+        // Loop through all processors
+        forAll (sendMap, procI)
+        {
+            // Get bounding boxes on this processor
+            const List<boundBox>& curProcBoundBoxes =
+                procRegionBB[procI];
+
+            // Get current processor send map
+            const dynamicLabelList& curSendMap = sendMap[procI];
+
+            // Loop through all donor regions
+            forAll (dr, drI)
+            {                
+                // Get region index of this donor region
+                const label& curDonorRegion = dr[drI];
+
+                // Loop through all local acceptors
+                forAll (a, aI)
+                {
+                    // Check whether the acceptor is within the bounding box of
+                    // this donor region on this particular processor.
+                    if
+                    (
+                        curProcBoundBoxes[curDonorRegion].containsInside
+                        (
+                            accCellCentres[aI]
+                        )
+                    )
+                    {
+                        // Acceptor may find donor on this processor, append it
+                        curSendMap.append(aI);
+
+                        // Increment the number of acceptors I'm sending to this
+                        // processor
+                        ++numberOfLocalAcceptorsToProc[procI];
+                    }
+                } // End for all processors
+            } // End for all donor regions
+        } // End for all acceptors
+
+        // STAGE 3: Count number of points I'm receiving from all other
+        // processors
+
+        // Gather/scatter number of acceptor points going to each processor from
+        // each processor so that all processors have all necessary information
+        // when creating the map distribute tool for distributing acceptor
+        // points
+        Pstream::gatherList(nAcceptorsToProcessorMap);
+        Pstream::scatterList(nAcceptorsToProcessorMap);
+
+        // Count how many acceptor points I'm going to be receiving from others
+        label nReceives = 0;
+        forAll (nAcceptorsToProcessorMap, procI)
+        {
+            nReceives += nAcceptorsToProcessorMap[procI][Pstream::myProcNo()];
+        }
+
+        // STAGE 4: Calculation of construct map
+
+        // The construct map is simply an index offseted by the number of values
+        // received by previous processors.
+        // Example:
+        /*
+           Procs sending to me | Number of items being sent
+          --------------------------------------------------
+                  P0           |             1              
+                  P1           |             7              
+                  P5           |             2              
+                  .            |             .
+                  .            |             .
+                  .            |             .
+
+            Received data has the following form:
+            (
+                a_0, (one value from proc 0)
+                a_1, a_2, a_3, a_4, a_5, a_6, a_7 (seven values from proc 1)
+                a_8, a_9 (two values from proc 5)
+                ...
+                ...
+                ...
+        */
+
+        // Create construct map
+        labelListList constructMap(Pstream::nProcs());
+
+        // Counter for offset
+        label procOffset = 0;
+
+        forAll (constructMap, procI)
+        {
+            // Get receiving size from this processor
+            const label nReceivesFromCurProc =
+                nAcceptorsToProcessorMap[procI][Pstream::myProcNo()];
+
+            // Get current construct map
+            labelList& curConstructMap = constructMap[procI];
+
+            // Set the size corresponding to number of received acceptor points
+            curConstructMap.setSize(nReceivesFromCurProc);
+
+            // Set mapping as a simple offset
+            forAll (curConstructMap, receivedItemI)
+            {
+                curConstructMap[receivedItemI] = receivedItemI + procOffset;
+            }
+
+            // Increment the processor offset by the size received from this
+            // processor
+            procOffset += nReceivesFromCurProc;
+        }
+
+        // STAGE 5: Distribute acceptor points
+        
+        // Create mapDistribute object for distributing acceptor points
+        mapDistribute acceptorDistribution(nReceives, sendMap, constructMap);
+
+        // Distribute acceptor cell centres. Note: now accCellCentres holds cell
+        // centres received from other processor for which we need to find
+        // eligible donors
+        acceptorDistribution.distribute(accCellCentres);
+
+        // STAGE ?: Update eligible donors
+
+        // Recalculate eligible donors. Note: calcEligibleDonors() uses
+        // oversetFringe::acceptors() member function in order to mark all
+        // potential acceptor cells as ineligible. Not sure whether it is better
+        // to use acceptors from current iteration or all visited acceptors.
+        // Currently using all visited acceptors. VV, 30/Jan/2017.
+        deleteDemandDrivenData(eligibleDonorCellsPtr_);
+        const labelList& ed = eligibleDonors();
+
+        // STAGE ? + 1: Create oversetCommunicator object that will:
+        //          1. Send necessary acceptor data (acceptor points)
+        //          2. Perform donor search for each received acceptor point
+        //          3. Return 
+
+
+    } while (!fringePtr_->foundSuitableOverlap());
+
+
+
 
     // Get regions
     const PtrList<oversetRegion>& regions = oversetMesh_.regions();
@@ -775,7 +1032,7 @@ void Foam::oversetRegion::calcEligibleDonorCells() const
     if (eligibleDonorCellsPtr_)
     {
         FatalErrorIn("void oversetRegion::calcEligibleDonorCells() const")
-            << "Hole cells already calculated"
+            << "Eligible donor cells already calculated"
             << abort(FatalError);
     }
 
