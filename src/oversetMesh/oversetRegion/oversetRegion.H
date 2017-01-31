@@ -196,6 +196,11 @@ class oversetRegion
         //- Clear all data
         void clearOut() const;
 
+        //- Update donor acceptor for global overset fringe algorithm control
+        //  (called within calcDonorAcceptorCells(), even from other regions).
+        //  Returns true if this region found suitable set of donors
+        bool updateDonorAcceptors();
+
 
 public:
 
