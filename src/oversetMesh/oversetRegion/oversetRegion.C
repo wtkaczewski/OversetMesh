@@ -162,6 +162,8 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
     // 1) Start iteration process by getting current set of acceptors from
     //    oversetFringe
     //
+    //    -----SENDING/RECEIVING ACCEPTORS PART----- 
+    //
     // 2) We need to calculate the sending map for acceptors, which tells me
     //    which acceptors points I need to send to which processor:
     //    - Loop through acceptors for this region and through all donor regions
@@ -174,27 +176,40 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
     //      sending to each processor
     // 3) Count how many acceptor points my (local) processor is going to be
     //    receiving from all other processors
-    // 4) Create a constructing map, organized as follows:
+    // 4) Create a constructing map for acceptors, organized as follows:
     //    - If processor N sends me M acceptor points, these points will be
     //      stored in the receiving list from indices K to K + M - 1, where K
     //      is the total number of acceptor points received from previous
     //      processors (processors I, where I < N)
-    // 5) Create mapDistribute object and distribute acceptor points
+    // 5) Create mapDistribute object and distribute acceptor data
     //
-    // 6) Find donors for received acceptors
+    //    -----DONOR SEARCH PART-----
     //
-    // 5) Update eligible donors (eligible donors are cells that are neither
-    //    acceptors nor holes)
-    // 6) Create oversetCommunicator object using the sending map and:
-    //    - Send necessary acceptor data
-    //    - Perform donor search
-    //    - Receive donors coming from multiple processors (with different
-    //      values of Donor Suitability Function, see oversetFringe)
-    // 7) Update donor/acceptor pairs for this region, resolving multiple hits
-    //    based on Donor Suitability Function
-    // 8) Update acceptors in oversetFringe, which takes care of iteration
-    //    process (if necessary)
-    // 9) Go to 1) until oversetFringe decides it is time to stop
+    // 6) Find donors for received acceptors (using octree search based on
+    //    eligible donors only) and collect them in bareDonorAcceptor list
+    //    necessary for addressing after communicating donor data
+    //
+    //    -----SENDING/RECEIVING DONORS PART-----
+    //
+    // 7) Create sending map for donors - this is simply the constructing map
+    //    for acceptors
+    // 8) Count how many donor/acceptor pairs my (local) processor is going to
+    //    be receiving from all other processors. Note that for a given
+    //    acceptor we can actually have multiple donors coming from different
+    //    processors
+    // 9) Create constructing map for donors, organized as follows (the same way
+    //    as the constructing map for acceptors):
+    //    - If processor N sends me M donors, these donors will be stored in the
+    //      receiving list from indices K to K + M - 1, where K is the total
+    //      number of donor points received from previous processors (processors
+    //      I, where I < N)
+    // 10) Create mapDistribute object and distribute donor data
+    //
+    //    -----FRINGE HANDLING-----
+    //
+    // 11) Pass new batch of bare donor/acceptor pairs to fringe algorithm,
+    //     which does its own magic (donor suitability, iteration control,
+    //     update of eligible donors...)
 
     // Get necessary data that does not depend on (possible) iteration process
 
@@ -203,6 +218,9 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
 
     // Get donor regions
     const labelList& dr = donorRegions();
+
+    // Get all overset regions
+    const PtrList<oversetRegion>& regions = oversetMesh_.regions();
 
     // Get region bounding boxes for all processors and regions: used to decide
     // where we need to send the data (i.e. it does not make sense to send
@@ -242,32 +260,32 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
         labelList& numberOfLocalAcceptorsToProcs =
             nAcceptorsToProcessorMap[Pstream::myProcNo()];
 
-        // STAGE 2: Calculate the sending map
+        // STAGE 2: Calculate the sending map (for sending acceptor points)
 
-        // Example: sendMap[procI] = (0 1 5 7 89 ...) tells us that I should
-        // send field values (acceptor points in this case) indexed by: 0, 1, 5,
-        // 7, 89... to processor procI
+        // Example: sendAcceptorMap[procI] = (0 1 5 7 89 ...) tells us that I
+        // should send field values (acceptor points in this case) indexed by:
+        // 0, 1, 5, 7, 89... to processor procI
 
         // Initialize sending map: for each processor, create a DynamicList of
-        // acceptors that need to be send to that processor
-        List<dynamicLabelList>& sendMap(Pstream::nProcs());
+        // acceptors that need to be sent to that processor
+        List<dynamicLabelList>& sendAcceptorMap(Pstream::nProcs());
 
         // Allocate enough storage as if we are sending all acceptors to all
         // processors (trading off memory for performance)
-        forAll (sendMap, procI)
+        forAll (sendAcceptorMap, procI)
         {
-            sendMap[procI].setCapacity(a.size());
+            sendAcceptorMap[procI].setCapacity(a.size());
         }
 
         // Loop through all processors
-        forAll (sendMap, procI)
+        forAll (sendAcceptorMap, procI)
         {
             // Get bounding boxes on this processor
             const List<boundBox>& curProcBoundBoxes =
                 procRegionBB[procI];
 
             // Get current processor send map
-            const dynamicLabelList& curSendMap = sendMap[procI];
+            const dynamicLabelList& curSendMap = sendAcceptorMap[procI];
 
             // Loop through all donor regions
             forAll (dr, drI)
@@ -310,13 +328,14 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
         Pstream::scatterList(nAcceptorsToProcessorMap);
 
         // Count how many acceptor points I'm going to be receiving from others
-        label nReceives = 0;
+        label nAcceptorReceives = 0;
         forAll (nAcceptorsToProcessorMap, procI)
         {
-            nReceives += nAcceptorsToProcessorMap[procI][Pstream::myProcNo()];
+            nAcceptorReceives +=
+                nAcceptorsToProcessorMap[procI][Pstream::myProcNo()];
         }
 
-        // STAGE 4: Calculation of construct map
+        // STAGE 4: Calculation of construct map for acceptors
 
         // The construct map is simply an index offseted by the number of values
         // received by previous processors.
@@ -339,22 +358,23 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
                 ...
                 ...
                 ...
+            )
         */
 
         // Create construct map
-        labelListList constructMap(Pstream::nProcs());
+        labelListList constructAcceptorMap(Pstream::nProcs());
 
         // Counter for offset
         label procOffset = 0;
 
-        forAll (constructMap, procI)
+        forAll (constructAcceptorMap, procI)
         {
             // Get receiving size from this processor
             const label nReceivesFromCurProc =
                 nAcceptorsToProcessorMap[procI][Pstream::myProcNo()];
 
             // Get current construct map
-            labelList& curConstructMap = constructMap[procI];
+            labelList& curConstructMap = constructAcceptorMap[procI];
 
             // Set the size corresponding to number of received acceptor points
             curConstructMap.setSize(nReceivesFromCurProc);
@@ -372,550 +392,201 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
 
         // STAGE 5: Distribute acceptor points
         
-        // Create mapDistribute object for distributing acceptor points
-        mapDistribute acceptorDistribution(nReceives, sendMap, constructMap);
+        // Create mapDistribute object for distributing acceptor points. Note:
+        // reusing maps, meaning that arguments are invalid from now onward.
+        mapDistribute acceptorDistribution
+        (
+            nAcceptorReceives,
+            sendAcceptorMap,
+            constructAcceptorMap,
+            true // reuse maps
+        );
 
         // Distribute acceptor cell centres. Note: now accCellCentres holds cell
         // centres received from other processor for which we need to find
         // eligible donors
         acceptorDistribution.distribute(accCellCentres);
 
-        // STAGE ?: Update eligible donors
+        // Also distribute a copy of local acceptor cell indices. After
+        // communication, this data will be present remote processor acceptor
+        // indices and will be used to transfer donor/acceptor pair information
+        labelList accRemoteIndices = a;
+        acceptorDistribution.distribute(accRemoteIndices);
 
-        // Recalculate eligible donors. Note: calcEligibleDonors() uses
-        // oversetFringe::acceptors() member function in order to mark all
-        // potential acceptor cells as ineligible. Not sure whether it is better
-        // to use acceptors from current iteration or all visited acceptors.
-        // Currently using all visited acceptors. VV, 30/Jan/2017.
-        deleteDemandDrivenData(eligibleDonorCellsPtr_);
-        const labelList& ed = eligibleDonors();
+        // STAGE 6: Find donors for received acceptors
 
-        // STAGE ? + 1: Create oversetCommunicator object that will:
-        //          1. Send necessary acceptor data (acceptor points)
-        //          2. Perform donor search for each received acceptor point
-        //          3. Return 
+        // For each donor region, create a list of "bare" donor/acceptor
+        // data. Bare donor/acceptor data includes: acceptor index in the local
+        // processor acceptor list (not the cell index!), donor cell index (not
+        // the index in donor list!), donor point and donor processor number.
+        // Note 1: the addressing of donor/acceptors will be the same as
+        // received acceptors in order to easily send the data back in case of
+        // multiple donor regions.
+        // Note 2: We will prefer donors that are closer to the acceptor and
+        // send back only those.
 
-
-    } while (!fringePtr_->foundSuitableOverlap());
-
-
-
-
-    // Get regions
-    const PtrList<oversetRegion>& regions = oversetMesh_.regions();
-
-    // Behave as acceptor: prepare acceptor data for search
-    // Operating on acceptor cells for current region on local processor
-
-    // Prepare and broadcast all acceptors from this region
-
-    // Get cell centres
-    const vectorField& cc = mesh_.cellCentres();
-
-    // Get cell cells (for extended neighbourhood search)
-    const labelListList& cCells = mesh().cellCells();
-
-    // Get list of donor regions
-    const labelList& dr = donorRegions();
-
-    // Get list of local acceptor cell labels from fringe
-    const labelList& a = fringePtr_().acceptors();
-
-    // Prepare local acceptor list
-    acceptorCellsPtr_ = new donorAcceptorList(a.size());
-    donorAcceptorList& localDA = *acceptorCellsPtr_;
-
-    // Insert local acceptors into the list
-    forAll (a, aI)
-    {
-        localDA[aI] = donorAcceptor
-        (
-            a[aI],
-            Pstream::myProcNo(),
-            cc[a[aI]]
-        );
-    }
-
-    if (Pstream::parRun())
-    {
-        // Make a global list of all acceptors
-        donorAcceptorListList globalDonorAcceptor(Pstream::nProcs());
-
-        // Copy local acceptor list into processor slot
-        globalDonorAcceptor[Pstream::myProcNo()] = localDA;
-
-        // Gather-scatter acceptor data before donor indentification
-        Pstream::gatherList(globalDonorAcceptor);
-        Pstream::scatterList(globalDonorAcceptor);
-
-        // Donor identification: search for donors for all processors
-        // using local donor regions
-        // Note: local donor identification cannot happen here:
-        // there may be multiple donors with tolerance issues, to be resolved
-        // on master processor.
-        // Local donor identification shall happen after the identification
-        // to resolve issues with multiple hits
-        // HJ, 1/May/2015
-
-        // Go through all donor regions and identify donor cells
+        // Note that the bareDonorAcceptor's default constructor sets donor cell
+        // ID to -1 and donor point to vector::max
+        List<bareDonorAcceptor> bareDonors(accCellCentres.size());
+        
+        // Loop through donor regions
         forAll (dr, drI)
         {
-            if (dr[drI] == index())
-            {
-                FatalErrorIn
-                (
-                    "void oversetRegion::calcDonorAcceptorCells() const"
-                )   << "Region " << name() << " specified as the donor "
-                    << "of itself.  List of donors: " << dr << nl
-                    << "This is not allowed: check oversetMesh definition"
-                    << abort(FatalError);
-            }
-
             // Get current donor region
             const oversetRegion& curDonorRegion = regions[dr[drI]];
 
-            const labelList& curDonors = regions[dr[drI]].eligibleDonors();
+            // Get current eligible donors for this region. Note: these are
+            // updated after a particular overset region finishes an iteration
+            // of fringe assembly
+            const labelList& curDonors = curDonorRegion.eligibleDonors();
 
-            // Mask eligible donors for extended neighbourhood search
-            boolList eligibleDonorMask(mesh_.nCells(), false);
-            forAll (curDonors, i)
-            {
-                eligibleDonorMask[curDonors[i]] = true;
-            }
-
-            // Get donor region tree
+            // Get donor region tree. Note: octree also depends on eligible
+            // donors, updated at the end of iteration
             const indexedOctree<treeDataCell>& tree =
                 curDonorRegion.cellSearch();
 
-            // If the tree is empty on local processor, do not search
-            if (tree.nodes().empty())
+            const scalar span = tree.bb().mag();
+
+            // Loop through received acceptor cell centres
+            forAll (accCellCentres, accI)
             {
-                continue;
-            }
+                // Get acceptor cell centre
+                const point& curP = accCellCentres[accI];
 
-            scalar span = tree.bb().mag();
-
-            // Go through all processors and see if local donor can be found
-
-            // For all acceptors, perform donor search
-            // Searching for donor cells on local processors using the
-            // requested acceptor data from all processors
-            forAll (globalDonorAcceptor, procI)
-            {
-                List<donorAcceptor>& curDA = globalDonorAcceptor[procI];
-
-                forAll (curDA, daI)
-                {
-                    if (!curDA[daI].donorFound())
-                    {
-                        const vector& curP = curDA[daI].acceptorPoint();
-
-                        // Find nearest cell with octree
-                        // Note: octree only contains eligible cells
-                        // HJ, 10/Jan/2015
-                        pointIndexHit pih = tree.findNearest(curP, span);
-
-                        if (pih.hit())
-                        {
-                            // Found a hit.  Additional check for point in cell
-                            // Note: Consider removing additional test to
-                            // improve robustness.  HJ, 1/Jun/2015
-//                             if
-//                             (
-//                                 mesh_.pointInCellBB
-//                                 (
-//                                     curP,
-//                                     curDonors[pih.index()]
-//                                 )
-//                             )
-                            {
-                                // Identified local donor.  Set donor data
-                                // to let acceptor know about the match
-                                curDA[daI].setDonor
-                                (
-                                    curDonors[pih.index()],
-                                    Pstream::myProcNo(),
-                                    cc[curDonors[pih.index()]]
-                                );
-
-                                // Set extended donors by going through
-                                // neigbours of currently set "best" donor
-                                curDA[daI].setExtendedDonors
-                                (
-                                    eligibleDonorMask,
-                                    cCells,
-                                    cc
-                                );
-
-                                // Note:
-                                // It is possible to use better criterion for
-                                // extended stencil than simply immediate
-                                // neighbours of the found donor cell. Note that
-                                // this also neglects neigbhouring donors across
-                                // processor boundaries. VV, 21/Oct/2016.
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Gather-scatter acceptor data after donor search
-
-        // At this point, each processor has filled parts of every other
-        // processors's list.  Therefore, a simple gather-scatter will not do
-        // Algorithm:
-        // - send all processor data to master
-        // - master recombines
-        // - scatter to all processors
-        if (Pstream::master())
-        {
-            // Count multiple parallel hits
-            label nMultipleHits = 0;
-
-            // Receive data from all processors and recombine
-            for (label procI = 1; procI < Pstream::nProcs(); procI++)
-            {
-                // Receive list from slave
-                IPstream fromSlave
-                (
-                    Pstream::blocking,
-                    procI
-                );
-
-                donorAcceptorListList otherDonorAcceptor(fromSlave);
-
-                // Perform recombination
-                // If slave has found the acceptor and recombined list
-                // did not, copy the data from the slave into the recombined
-                // list
-                // If two processors have found the acceptor, take closer hit
-                forAll (globalDonorAcceptor, pI)
-                {
-                    // Get reference to recombined list
-                    donorAcceptorList& recombined =
-                        globalDonorAcceptor[pI];
-
-                    // Get reference to candidate list
-                    const donorAcceptorList& candidate =
-                        otherDonorAcceptor[pI];
-
-                    // Compare candidate with recombined list
-                    // If candidate has found the donor, record it in the
-                    // recombined list
-                    forAll (candidate, cI)
-                    {
-                        if (candidate[cI].donorFound())
-                        {
-                            if (!recombined[cI].donorFound())
-                            {
-                                // Candidate has found the donor
-                                // Record donor and donor processor
-                                recombined[cI].setDonor
-                                (
-                                    candidate[cI].donorCell(),
-                                    candidate[cI].donorProcNo(),
-                                    candidate[cI].donorPoint()
-                                );
-
-                                // Also record extended donors from the
-                                // candidate
-                                recombined[cI].setExtendedDonors(candidate[cI]);
-                            }
-                            else
-                            {
-                                // Multiple hit: take closer donor cell
-                                if
-                                (
-                                    candidate[cI].distance()
-                                  < recombined[cI].distance()
-                                )
-                                {
-                                    recombined[cI].setDonor
-                                    (
-                                        candidate[cI].donorCell(),
-                                        candidate[cI].donorProcNo(),
-                                        candidate[cI].donorPoint()
-                                    );
-
-                                    // Also record extended donors from the
-                                    // candidate
-                                    recombined[cI].setExtendedDonors
-                                    (
-                                        candidate[cI]
-                                    );
-
-                                    nMultipleHits++;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Report mutiple hits
-            if (nMultipleHits > 0)
-            {
-                WarningIn
-                (
-                    "void oversetRegion::calcDonorAcceptorCells() const"
-                )   << "Region " << name()
-                    << ": Found " << nMultipleHits
-                    << " multiple parallel donor hits.  "
-                    << "Probably direct face hits"
-                    << endl;
-            }
-        }
-        else
-        {
-            // Slave processor: send global list to master
-            OPstream toMaster
-            (
-                Pstream::blocking,
-                Pstream::masterNo()
-            );
-
-            toMaster << globalDonorAcceptor;
-        }
-
-        // Scatter recombined list to all processors
-        Pstream::scatter(globalDonorAcceptor);
-
-        // Create a list to record local donors.  Guess the size as
-        //  donorFraction of number of cells
-        DynamicList<donorAcceptor> localDonors
-        (
-            Foam::max(mesh_.nCells()/donorFraction(), 100)
-        );
-
-        forAll (globalDonorAcceptor, procI)
-        {
-            List<donorAcceptor>& curDA = globalDonorAcceptor[procI];
-
-            forAll (curDA, daI)
-            {
-                if (curDA[daI].donorProcNo() == Pstream::myProcNo())
-                {
-                    // Record local donor data.  Note: acceptor
-                    // processor may be remote
-                    localDonors.append(curDA[daI]);
-                }
-            }
-        }
-
-
-        // Check if donors have been found for all local acceptors
-        {
-            // Grab local acceptors
-            localDA = globalDonorAcceptor[Pstream::myProcNo()];
-
-            labelList nDonorsFromProc(Pstream::nProcs(), 0);
-
-            label nUncoveredAcceptors = 0;
-
-            forAll (localDA, daI)
-            {
-                if (!localDA[daI].donorFound())
-                {
-                    // Donor not found globally
-                    WarningIn
-                    (
-                        "void oversetRegion::calcDonorAcceptorCells() const"
-                    )   << "Donor not found for cell "
-                        << localDA[daI].acceptorCell() << " on processor "
-                        << localDA[daI].acceptorProcNo()
-                        << " centre = " << localDA[daI].acceptorPoint()
-                        << endl;
-
-                    nUncoveredAcceptors++;
-                }
-                else
-                {
-                    // Assemble donor statistics
-                    nDonorsFromProc[localDA[daI].donorProcNo()]++;
-                }
-            }
-
-//             Pout<< "Region " << name()
-//                 << " number of processor donors for " << localDA.size()
-//                 << " local acceptors per processor: " << nDonorsFromProc
-//                 << endl;
-
-            // Check for uncovered acceptors
-            if (nUncoveredAcceptors > 0)
-            {
-                FatalErrorIn
-                (
-                    "void oversetRegion::calcDonorAcceptorCells() const"
-                )   << "Inconsistency in donor cell data assembly"
-                    << abort(FatalError);
-            }
-
-            // Sanity check
-            if
-            (
-                nUncoveredAcceptors == 0
-             && sum(nDonorsFromProc) != localDA.size()
-            )
-            {
-                FatalErrorIn
-                (
-                    "void oversetRegion::calcDonorAcceptorCells() const"
-                )   << "Inconsistency in donor cell data assembly"
-                    << abort(FatalError);
-            }
-        }
-
-        // Grab local parallel donors
-        donorCellsPtr_ = new donorAcceptorList();
-        donorAcceptorList& d = *donorCellsPtr_;
-
-        d.transfer(localDonors.shrink());
-
-        // Sanity check local donors
-        labelList nDonorsToProc(Pstream::nProcs(), 0);
-
-        forAll (d, dI)
-        {
-            // Assemble donor statistics
-            nDonorsToProc[d[dI].acceptorProcNo()]++;
-        }
-
-//         Pout<< "Region " << name()
-//             << " number of local donors = " << d.size()
-//             << " per processor: " << nDonorsToProc
-//             << endl;
-    }
-    else
-    {
-        // Serial run.  All donors and acceptors are local
-
-        // Note: in a serial run, donorCells and acceptorCells
-        // contain identical data.  This is duplicated for the moment
-        // HJ, 1/May/2015
-
-        // Go through all donor regions and identify donor cells
-        forAll (dr, drI)
-        {
-            if (dr[drI] == index())
-            {
-                FatalErrorIn
-                (
-                    "void oversetRegion::calcDonorAcceptorCells() const"
-                )   << "Region " << index() << " specified as the donor "
-                    << "of itself.  List of donors: " << dr << nl
-                    << "This is not allowed: check oversetMesh definition"
-                    << abort(FatalError);
-            }
-
-            // Get current donor region
-            const oversetRegion& curDonorRegion = regions[dr[drI]];
-
-            const labelList& curDonors = regions[dr[drI]].eligibleDonors();
-
-            // Mask eligible donors for extended neighbourhood search
-            boolList eligibleDonorMask(mesh_.nCells(), false);
-            forAll (curDonors, i)
-            {
-                eligibleDonorMask[curDonors[i]] = true;
-            }
-
-            // Get donor region tree
-            const indexedOctree<treeDataCell>& tree =
-                curDonorRegion.cellSearch();
-
-            scalar span = tree.bb().mag();
-
-            forAll (localDA, daI)
-            {
-                const vector& curP = localDA[daI].acceptorPoint();
-
-                // Find nearest cell with octree
-                // Note: octree only contains eligible cells
-                // HJ, 10/Jan/2015
+                // Find nearest donor cell with octree. Note: octree only
+                // contains eligible cells.  HJ, 10/Jan/2015.
                 pointIndexHit pih = tree.findNearest(curP, span);
+
+                // Get current bare donor/acceptor pair
+                bareDonorAcceptor& bda = bareDonors[accI];
 
                 if (pih.hit())
                 {
-                    // Found a hit.  Additional check for point in cell
-                    // Note: Consider removing additional test to improve
-                    // robustness.  HJ, 1/Jun/2015
-//                     if
-//                     (
-//                         mesh_.pointInCellBB
-//                         (
-//                             curP,
-//                             curDonors[pih.index()]
-//                         )
-//                     )
-                    {
-                        // Identified donor.  Set donor data
-                        // to let acceptor know about the match
-                        localDA[daI].setDonor
-                        (
-                            curDonors[pih.index()],
-                            Pstream::myProcNo(),
-                            cc[curDonors[pih.index()]]
-                        );
+                    // Found a hit, check whether this donor is set or not. If
+                    // it is not set, set it no questions asked; if it is set,
+                    // check whether this is a better candidate by either
+                    // looking whether acceptor point is within donor cell or
+                    // taking a closer hit
 
-                        // Set extended donors by going through
-                        // neigbours of currently set "best" donor
-                        localDA[daI].setExtendedDonors
+                    // Get index obtained by octree
+                    const label& donorCandidateIndex = pih.index();
+
+                    if
+                    (
+                       !bda.donorFound()
+                     || mesh_.pointInCellBB
                         (
-                            eligibleDonorMask,
-                            cCells,
-                            cc
-                        );
+                            curP,
+                            curDonors[donorCandidateIndex]
+                        )
+                     || (
+                            mag(cc[curDonors[donorCandidateIndex]] - curP)
+                          < mag(bda.donorPoint() - curP)
+                        )
+                    )
+                    {
+                        // Set donor acceptor pair
+                        bda.donorCell() = curDonors[donorCandidateIndex];
+                        bda.donorPoint() = cc[curDonorI];
+                        bda.donorProcNo() = Pstream::myProcNo();
+                        bda.acceptorLocalIndex() = accRemoteIndices[accI];
+                    }
+
+                    // Note: consider removing pointInCellBB since it now has
+                    // precedence over distance criterion.  VV, 31/Jan/2017.
+                }
+                else
+                {
+                    if (bda[accI].donorFound())
+                    {
+                        // This donor is not valid and I did not find a hit in
+                        // octree, issue a warning
+                        WarningIn
+                        (
+                            "void oversetRegion::calcDonorAcceptorCells() const"
+                        )   << "Could not find a hit for acceptor," 
+                            << "donor may remain invalid."
+                            << endl;
                     }
                 }
-            }
-        } // End of all donor regions
+            } // End for all acceptor cell centres
+        } // End for all donor regions
 
-        // Check if donors have been found for all local acceptors
+        // STAGE 7: Create sending map for donors
+
+        // Note: sending map for donors is basically the constructing map for
+        // acceptors since we have used the same addressing for donor search.
+        // Create a copy from map distribute object used to communicate acceptor
+        // data
+        labelListList sendDonorMap = acceptorDistribution.constructMap();
+
+        // STAGE 8: Count how many donors I'm going to receive
+
+        // Note: reuse nAcceptorsToProcessorMap[i][j], which tells me how many
+        // acceptors processor i is sending to processor j. The number of donors
+        // received by processor j is the same as the number of acceptors sent
+        // to processor j.
+        label nDonorReceives = 0;
+        forAll(nAcceptorProcessorMap, procI)
         {
-            labelHashSet uncoveredAcceptors;
-
-            forAll (localDA, daI)
-            {
-                if (!localDA[daI].donorFound())
-                {
-                    uncoveredAcceptors.insert(localDA[daI].acceptorCell());
-                }
-            }
-
-            // Check for uncovered acceptors
-            if (!uncoveredAcceptors.empty())
-            {
-                // Write uncovered cellSet
-                const fileName uncoveredSetName(name() + "uncoveredAcceptors");
-
-                cellSet
-                (
-                    mesh(),
-                    uncoveredSetName,
-                    uncoveredAcceptors
-                ).write();
-
-                FatalErrorIn
-                (
-                    "void oversetRegion::calcDonorAcceptorCells() const"
-                )   << "Inconsistency in donor cell data assembly for region "
-                    << name() << ".  Found " << uncoveredAcceptors.size()
-                    << " uncovered acceptors" << nl
-                    << "Writing " << uncoveredSetName
-                    << abort(FatalError);
-            }
+            nDonorReceives +=
+                nAcceptorsToProcessorMap[Pstream::myProcNo()][procI];
         }
 
-        Info<< "Serial region " << name()
-            << " number of donors and acceptors: " << localDA.size()
-            << endl;
+        // STAGE 9: Calculation of construct map for donors
 
-        // Since in serial execution donor and acceptor data is identical
-        // copy the acceptor list into donor list after the search and check
-        // have been performed
-        donorCellsPtr_ = new donorAcceptorList(localDA);
-    }
+        // Create construct map
+        labelListList constructDonorMap(Pstream::nProcs());
+
+        // Reset existing processor offset counter
+        procOffset = 0;
+
+        forAll (constructDonorMap, procI)
+        {
+            // Get receiving size from this processor. Reusing
+            // nAcceptorsToProcessorMap as in STAGE 8
+            const label nReceivesFromCurProc =
+                nAcceptorsToProcessorMap[Pstream::myProcNo()][procI];
+
+            // Get current construct map
+            labelList& curConstructMap = constructDonorMap[procI];
+
+            // Set the size corresponding to number of received donor/acceptor
+            // pairs
+            curConstructMap.setSize(nReceivesFromCurProc);
+
+            // Set mapping as a simple offset
+            forAll (curConstructMap, receivedItemI)
+            {
+                curConstructMap[receivedItemI] = receivedItemI + procOffset;
+            }
+            
+            // Increment the processor offset by the size received from this
+            // processor
+            procOffset += nReceivesFromCurProc;
+        }
+
+        // STAGE 10: Distribute donor data
+
+        // Create mapDistribute object for distributing donor data. Note:
+        // reusing maps, meaning that arguments are invalid from now onward.
+        mapDistribute donorDistribution
+        (
+            nDonorReceives,
+            sendDonorMap,
+            constructDonorMap,
+            true // reuse maps
+        );
+
+        // Distribute donor/acceptor pairs, for initial N acceptors I have send
+        // accross certain processors, I will receive M donor/acceptor pairs,
+        // where M >= N.
+        donorDistribution.distribute(bareDonors);
+
+        // STAGE 11: Pass bare donor/acceptors to fringe algorithm
+        fringePtr_->updateIteration(bareDonors);
+
+    } while (!fringePtr_->foundSuitableOverlap());
 }
 
 
