@@ -736,10 +736,25 @@ void Foam::oversetRegion::clearOut() const
 
 bool Foam::oversetRegion::updateDonorAcceptors()
 {
+    // Initialise pointers if they are NULL
+    if (!donorCellsPtr_ || !acceptorCellsPtr_)
+    {
+        // Null construct - sizes are unknown until the overset fringe assembly
+        // is finished
+        donorCellsPtr_ = new donorAcceptorList();
+        acceptorCellsPtr_ = new donorAcceptorList();
+    }
+
+    // If a suitable fringe on this region has been found, simply return true
+    if (fringePtr_->foundSuitableOverlap())
+    {
+        return true;
+    }
+
     // Algorithm (operates on acceptor cells):
     // 1) Start iteration for this region
     //
-    //    -----SENDING/RECEIVING ACCEPTORS PART----- 
+    //    -----SENDING/RECEIVING ACCEPTORS PART-----
     //
     // 2) We need to calculate the sending map for acceptors, which tells me
     //    which acceptors points I need to send to which processor:
@@ -763,7 +778,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     //    -----DONOR SEARCH PART-----
     //
     // 6) Find donors for received acceptors (using octree search based on
-    //    eligible donors only) and collect them in bareDonorAcceptor list
+    //    eligible donors only) and collect them in donorAcceptor list
     //    necessary for addressing after communicating donor data
     //
     //    -----SENDING/RECEIVING DONORS PART-----
@@ -784,9 +799,10 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     //
     //    -----FRINGE HANDLING-----
     //
-    // 11) Pass new batch of bare donor/acceptor pairs to fringe algorithm,
+    // 11) Pass new batch of donor/acceptor pairs to fringe algorithm,
     //     which does its own magic (donor suitability, iteration control,
-    //     update of eligible donors...)
+    //     update of eligible donors...) and then update donor/acceptor lists if
+    //     a suitable fringe has been found
 
     // Get mesh data
     const vectorField& cc = mesh_.cellCentres();
@@ -802,17 +818,25 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     // acceptor data to a processor if the acceptor point does not lie within
     // the bounding box of a given processor donor region)
     const List<List<boundBox> >& procRegionBB = procBoundBoxes();
-       
+
     // STAGE 1: Start iteration for this region
 
     // Get current and local acceptor cells from oversetFringe
     const labelList& a = fringePtr_->curAcceptors();
 
-    // Gather acceptor cell centres in a single list
-    List<point> accCellCentres(a.size());
-    forAll (accCellCentres, aI)
+    // Create a list of local acceptors (holding acceptors on this processor and
+    // donors on possibly remote processor)
+    donorAcceptorList localAcceptorDonorList(a.size());
+
+    // Insert local acceptor into the list
+    forAll (localAcceptorDonorList, aI)
     {
-        accCellCentres[aI] = cc[a[aI]];
+        localAcceptorDonorList[aI] = donorAcceptor
+            (
+                a[aI],
+                Pstream::myProcNo(),
+                cc[a[aI]]
+            );
     }
 
     // Create list containing number of acceptors my processor is sending to
@@ -862,7 +886,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
 
         // Loop through all donor regions
         forAll (dr, drI)
-        {                
+        {
             // Get region index of this donor region
             const label& curDonorRegion = dr[drI];
 
@@ -875,7 +899,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
                 (
                     curProcBoundBoxes[curDonorRegion].containsInside
                     (
-                        accCellCentres[aI]
+                        localAcceptorDonorList[aI].acceptorPoint()
                     )
                 )
                 {
@@ -916,9 +940,9 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     /*
        Procs sending to me | Number of items being sent
       --------------------------------------------------
-              P0           |             1              
-              P1           |             7              
-              P5           |             2              
+              P0           |             1
+              P1           |             7
+              P5           |             2
               .            |             .
               .            |             .
               .            |             .
@@ -964,7 +988,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     }
 
     // STAGE 5: Distribute acceptor points
-    
+
     // Create mapDistribute object for distributing acceptor points. Note:
     // reusing maps, meaning that arguments are invalid from now onward.
     mapDistribute acceptorDistribution
@@ -975,33 +999,24 @@ bool Foam::oversetRegion::updateDonorAcceptors()
         true // reuse maps
     );
 
-    // Distribute acceptor cell centres. Note: now accCellCentres holds cell
-    // centres received from other processor for which we need to find
+    // Distribute acceptor data. Note: now localAcceptorDonorList holds
+    // acceptor data received from other processor for which we need to find
     // eligible donors
-    acceptorDistribution.distribute(accCellCentres);
+    acceptorDistribution.distribute(localAcceptorDonorList);
 
-    // Also distribute a copy of local acceptor cell indices. After
-    // communication, this data will be present remote processor acceptor
-    // indices and will be used to transfer donor/acceptor pair information
-    labelList accRemoteIndices = a;
-    acceptorDistribution.distribute(accRemoteIndices);
+    // Use an alias (reference) from now on for clarity
+    donorAcceptorList& receivedAcceptorDonorList = localAcceptorDonorList;
 
     // STAGE 6: Find donors for received acceptors
 
-    // For each donor region, create a list of "bare" donor/acceptor
-    // data. Bare donor/acceptor data includes: acceptor index in the local
-    // processor acceptor list (not the cell index!), donor cell index (not
-    // the index in donor list!), donor point and donor processor number.
+    // For each donor region, create a list of donor/acceptor pairs
+    // data.
     // Note 1: the addressing of donor/acceptors will be the same as
     // received acceptors in order to easily send the data back in case of
     // multiple donor regions.
     // Note 2: We will prefer donors that are closer to the acceptor and
     // send back only those.
 
-    // Note that the bareDonorAcceptor's default constructor sets donor cell
-    // ID to -1 and donor point to vector::max
-    List<bareDonorAcceptor> bareDonors(accCellCentres.size());
-    
     // Loop through donor regions
     forAll (dr, drI)
     {
@@ -1020,18 +1035,18 @@ bool Foam::oversetRegion::updateDonorAcceptors()
 
         const scalar span = tree.bb().mag();
 
-        // Loop through received acceptor cell centres
-        forAll (accCellCentres, accI)
+        // Loop through received acceptor data
+        forAll (receivedAcceptorDonorList, accI)
         {
+            // Get current donor/acceptor pair
+            donorAcceptor& daPair = receivedAcceptorDonorList[accI];
+
             // Get acceptor cell centre
-            const point& curP = accCellCentres[accI];
+            const point& curP = daPair.acceptorPoint();
 
             // Find nearest donor cell with octree. Note: octree only
             // contains eligible cells.  HJ, 10/Jan/2015.
             pointIndexHit pih = tree.findNearest(curP, span);
-
-            // Get current bare donor/acceptor pair
-            bareDonorAcceptor& bda = bareDonors[accI];
 
             if (pih.hit())
             {
@@ -1046,7 +1061,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
 
                 if
                 (
-                   !bda.donorFound()
+                   !daPair.donorFound()
                  || mesh_.pointInCellBB
                     (
                         curP,
@@ -1054,15 +1069,17 @@ bool Foam::oversetRegion::updateDonorAcceptors()
                     )
                  || (
                         mag(cc[curDonors[donorCandidateIndex]] - curP)
-                      < mag(bda.donorPoint() - curP)
+                      < mag(daPair.donorPoint() - curP)
                     )
                 )
                 {
-                    // Set donor acceptor pair
-                    bda.donorCell() = curDonors[donorCandidateIndex];
-                    bda.donorPoint() = cc[curDonorI];
-                    bda.donorProcNo() = Pstream::myProcNo();
-                    bda.acceptorLocalIndex() = accRemoteIndices[accI];
+                    // Set donor
+                    daPair.setDonor
+                    (
+                        curDonors[donorCandidateIndex],
+                        Pstream::myProcNo(),
+                        cc[curDonors[donorCandidateIndex]]
+                    );
                 }
 
                 // Note: consider removing pointInCellBB since it now has
@@ -1070,14 +1087,14 @@ bool Foam::oversetRegion::updateDonorAcceptors()
             }
             else
             {
-                if (bda[accI].donorFound())
+                if (!daPair.donorFound())
                 {
                     // This donor is not valid and I did not find a hit in
                     // octree, issue a warning
                     WarningIn
                     (
                         "void oversetRegion::calcDonorAcceptorCells() const"
-                    )   << "Could not find a hit for acceptor," 
+                    )   << "Could not find a hit for acceptor,"
                         << "donor may remain invalid."
                         << endl;
                 }
@@ -1133,7 +1150,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
         {
             curConstructMap[receivedItemI] = receivedItemI + procOffset;
         }
-        
+
         // Increment the processor offset by the size received from this
         // processor
         procOffset += nReceivesFromCurProc;
@@ -1154,10 +1171,32 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     // Distribute donor/acceptor pairs, for initial N acceptors I have send
     // accross certain processors, I will receive M donor/acceptor pairs,
     // where M >= N.
-    donorDistribution.distribute(bareDonors);
+    donorDistribution.distribute(receivedAcceptorDonorList);
 
-    // STAGE 11: Pass bare donor/acceptors to fringe algorithm
-    fringePtr_->updateIteration(bareDonors);
+    // Use an alias (reference) from now on for clarity
+    donorAcceptorList& completeDonorAcceptorList = receivedAcceptorDonorList;
+
+    // MISSING: NEED TO RECOMBINE THE DATA! completeDonorAcceptorList has more
+    // entries than the original acceptor list because donors from multiple
+    // processors are possible and we need to make a choice...
+
+    // STAGE 11: Finish the iteration by updating the fringe and local
+    // donor/acceptor lists
+
+    // Update fringe
+    bool suitableOverlapFound = fringePtr_->updateIteration(bareDonors);
+
+    if (suitableOverlapFound)
+    {
+        // Suitable overlap has been found, populate local donor/acceptor lists
+        donorAcceptorList& localDonorCells = *donorCellsPtr_;
+        donorAcceptorList& localAcceptorCells = *acceptorCellsPtr_;
+
+        // MISSING: gather/scatter the list and each processor populates its own
+        // part
+    }
+
+    return suitableOverlapFound;
 }
 
 
