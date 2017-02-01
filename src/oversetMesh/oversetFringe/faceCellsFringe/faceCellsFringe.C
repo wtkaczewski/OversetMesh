@@ -103,6 +103,7 @@ void Foam::faceCellsFringe::clearAddressing() const
 {
     deleteDemandDrivenData(fringeHolesPtr_);
     deleteDemandDrivenData(acceptorsPtr_);
+    deleteDemandDrivenData(finalDonorAcceptorsPtr_);
 }
 
 
@@ -120,6 +121,7 @@ Foam::faceCellsFringe::faceCellsFringe
     patchNames_(dict.lookup("patches")),
     fringeHolesPtr_(NULL),
     acceptorsPtr_(NULL),
+    finalDonorAcceptorsPtr_(NULL),
     updateFringe_
     (
         dict.lookupOrDefault<Switch>("updateAcceptors", false)
@@ -137,10 +139,32 @@ Foam::faceCellsFringe::~faceCellsFringe()
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
-void Foam::updateIteration(donorAcceptorList& donorAcceptorRegionData)
+void Foam::faceCellsFringe::updateIteration
+(
+    donorAcceptorList& donorAcceptorRegionData
+) const
 {
-    // Simply transfer the contents of the argument list to member list
-    finalDonorAcceptors().transfer(donorAcceptorRegionData);
+    // If the donorAcceptor list has been allocated, something went wrong with
+    // the iteration procedure (not-updated flag): this function has been called
+    // more than once, which should not happen for manualFringe
+    if (finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("manualFringe::updateIteration(donorAcceptorList&")
+            << "finalDonorAcceptorPtr_ already allocated. Something went "
+            << "wrong with the iteration procedure (flag was not updated)."
+            << nl << "This should not happen for manualFringe."
+            << abort(FatalError);
+    }
+
+    // Allocate the list by reusing the argument list
+    finalDonorAcceptorsPtr_ = new donorAcceptorList
+    (
+        donorAcceptorRegionData,
+        true
+    );
+
+    // Set the flag to true
+    foundSuitableOverlap() = true;
 }
 
 
@@ -172,7 +196,11 @@ void Foam::faceCellsFringe::update() const
     {
         Info<< "faceCellsFringe::update() const" << endl;
 
+        // Clear out
         clearAddressing();
+
+        // Set flag to false
+        foundSuitableOverlap() = false;
     }
 }
 

@@ -46,7 +46,6 @@ Foam::oversetFringe::oversetFringe
 :
     mesh_(mesh),
     region_(region),
-    finalDonorAcceptors_(),
     foundSuitableOverlap_(false)
 {}
 

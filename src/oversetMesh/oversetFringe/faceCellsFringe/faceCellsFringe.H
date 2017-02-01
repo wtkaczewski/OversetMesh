@@ -68,6 +68,9 @@ class faceCellsFringe
         //- Acceptor cells
         mutable labelList* acceptorsPtr_;
 
+        //- Final donor/acceptor pairs for this region (fringe)
+        mutable donorAcceptorList* finalDonorAcceptorsPtr_;
+
         //- Switch whether to update acceptors/donors for possible changes in
         //  patch cells (switched off by default)
         const Switch updateFringe_;
@@ -117,7 +120,7 @@ public:
         virtual void updateIteration
         (
             donorAcceptorList& donorAcceptorRegionData
-        );
+        ) const
 
         //- Return list of deactivated (hole) cells
         //  Fringe hole cells are collected in addition to geometric hole
@@ -126,6 +129,9 @@ public:
 
         //- Return list of acceptor cells
         virtual const labelList& acceptors() const;
+
+        //- Return list of final donor acceptor pairs
+        virtual const donorAcceptorList& finalDonorAcceptors() const;
 
         //- Update the fringe
         virtual void update() const;

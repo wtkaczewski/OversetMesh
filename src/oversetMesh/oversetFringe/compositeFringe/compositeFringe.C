@@ -61,8 +61,8 @@ void Foam::compositeFringe::readBaseFringes(const dictionary& dict)
             )
         );
     }
-
 }
+
 
 void Foam::compositeFringe::calcAddressing() const
 {
@@ -124,6 +124,7 @@ void Foam::compositeFringe::clearAddressing()
 {
     deleteDemandDrivenData(fringeHolesPtr_);
     deleteDemandDrivenData(acceptorsPtr_);
+    deleteDemandDrivenData(finalDonorAcceptorsPtr_);
 }
 
 
@@ -139,7 +140,8 @@ Foam::compositeFringe::compositeFringe
 :
     oversetFringe(mesh, region, dict),
     fringeHolesPtr_(NULL),
-    acceptorsPtr_(NULL)
+    acceptorsPtr_(NULL),
+    finalDonorAcceptorsPtr_(NULL)
 {
     // Read fringes
     readBaseFringes(dict);
@@ -155,6 +157,35 @@ Foam::compositeFringe::~compositeFringe()
 
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
+
+void Foam::compositeFringe::updateIteration
+(
+    donorAcceptorList& donorAcceptorRegionData
+) const
+{
+    // If the donorAcceptor list has been allocated, something went wrong with
+    // the iteration procedure (not-updated flag): this function has been called
+    // more than once, which should not happen for manualFringe
+    if (finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("manualFringe::updateIteration(donorAcceptorList&")
+            << "finalDonorAcceptorPtr_ already allocated. Something went "
+            << "wrong with the iteration procedure (flag was not updated)."
+            << nl << "This should not happen for manualFringe."
+            << abort(FatalError);
+    }
+
+    // Allocate the list by reusing the argument list
+    finalDonorAcceptorsPtr_ = new donorAcceptorList
+    (
+        donorAcceptorRegionData,
+        true
+    );
+
+    // Set the flag to true
+    foundSuitableOverlap() = true;
+}
+
 
 const Foam::labelList& Foam::compositeFringe::fringeHoles() const
 {
@@ -184,7 +215,12 @@ void Foam::compositeFringe::update() const
 
     forAll (baseFringes_, bfI)
     {
-        baseFringes_[bfI].update();
+        // Update current base fringe
+        oversetFringe& curFringe = baseFringes_[bfI];
+        curFringe.update();
+
+        // Update flag for composite fringe
+        foundSuitableOverlap &= curFringe.foundSuitableOverlap();
     }
 }
 

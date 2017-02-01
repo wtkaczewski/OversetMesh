@@ -116,6 +116,7 @@ void Foam::manualFringe::clearAddressing() const
 {
     deleteDemandDrivenData(fringeHolesPtr_);
     deleteDemandDrivenData(acceptorsPtr_);
+    deleteDemandDrivenData(finalDonorAcceptorsPtr_);
 }
 
 
@@ -134,6 +135,7 @@ Foam::manualFringe::manualFringe
     acceptorsSetName_(dict.lookup("acceptors")),
     fringeHolesPtr_(NULL),
     acceptorsPtr_(NULL),
+    finalDonorAcceptorsPtr_(NULL),
     updateFringe_
     (
         dict.lookupOrDefault<Switch>("updateAcceptors", false)
@@ -151,10 +153,32 @@ Foam::manualFringe::~manualFringe()
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
-void Foam::updateIteration(donorAcceptorList& donorAcceptorRegionData)
+void Foam::manualFringe::updateIteration
+(
+    donorAcceptorList& donorAcceptorRegionData
+) const
 {
-    // Simply transfer the contents of the argument list to member list
-    finalDonorAcceptors().transfer(donorAcceptorRegionData);
+    // If the donorAcceptor list has been allocated, something went wrong with
+    // the iteration procedure (not-updated flag): this function has been called
+    // more than once, which should not happen for manualFringe
+    if (finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("manualFringe::updateIteration(donorAcceptorList&")
+            << "finalDonorAcceptorPtr_ already allocated. Something went "
+            << "wrong with the iteration procedure (flag was not updated)."
+            << nl << "This should not happen for manualFringe."
+            << abort(FatalError);
+    }
+
+    // Allocate the list by reusing the argument list
+    finalDonorAcceptorsPtr_ = new donorAcceptorList
+    (
+        donorAcceptorRegionData,
+        true
+    );
+
+    // Set the flag to true
+    foundSuitableOverlap() = true;
 }
 
 
@@ -186,7 +210,11 @@ void Foam::manualFringe::update() const
     {
         Info<< "manualFringe::update() const" << endl;
 
+        // Clear out
         clearAddressing();
+
+        // Set flag to false
+        foundSuitableOverlap() = false;
     }
 }
 

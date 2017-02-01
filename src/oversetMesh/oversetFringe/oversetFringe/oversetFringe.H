@@ -78,9 +78,6 @@ class oversetFringe
         //- Reference to oversetRegion
         const oversetRegion& region_;
 
-        //- Final donor/acceptor pairs for this region (fringe)
-        donorAcceptorDynamicList finalDonorAcceptors_;
-
         //- Flag indicating whether a suitable overlap has been found
         bool foundSuitableOverlap_;
 
@@ -98,10 +95,11 @@ protected:
 
     // Protected Member Functions
 
-        //- Access to final donor acceptor pair
-        donorAcceptorDynamicList& finalDonorAcceptors()
+        //- Return access to the flag (set by derived classes during calls
+        //  to updateIteration()
+        bool& foundSuitableOverlap()
         {
-            return finalDonorAcceptors_;
+            return foundSuitableOverlap_;
         }
 
 
@@ -171,24 +169,6 @@ public:
                 return region_;
             }
 
-            //- Return reference to final donor acceptor pairs
-            const donorAcceptorDynamicList& finalDonorAcceptors() const
-            {
-                if (!foundSuitableOverlap_)
-                {
-                    FatalErrorIn("oversetFringe::finalDonorAcceptors()")
-                        << "Requesting access to final donor/acceptor pairs "
-                        << "for region: " << region_.name() << ", but the "
-                        << "fringe has not been calculated yet."
-                        << nl
-                        << "The function should only be called from "
-                        << "oversetRegion::finaliseDonorAcceptors()."
-                        << abort(FatalError);
-                }
-
-                return finalDonorAcceptors_;
-            }
-
 
         // Iteration control
 
@@ -202,7 +182,7 @@ public:
             virtual void updateIteration
             (
                 donorAcceptorList& donorAcceptorRegionData
-            ) = 0;
+            ) const = 0;
 
 
         // Access to fringe data
@@ -215,6 +195,9 @@ public:
             //- Return list of acceptor cells
             virtual const labelList& acceptors() const = 0;
 
+            //- Return reference to final donor acceptor pairs
+            virtual const donorAcceptorList& finalDonorAcceptors() const = 0;
+      
 
         //- Update the fringe
         virtual void update() const = 0;
