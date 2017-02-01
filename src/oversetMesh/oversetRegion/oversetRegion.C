@@ -153,13 +153,13 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
     if (donorCellsPtr_ || acceptorCellsPtr_)
     {
         FatalErrorIn("void oversetRegion::calcDonorAcceptorCells() const")
-            << "Donor cells already calculated"
+            << "Donor/acceptor cells already calculated"
             << abort(FatalError);
     }
 
     // If the pointers are not allocated, this means that the fringe has not
     // been calculated yet. Note that we need to perform fringe assembly for
-    // each regions in an iterative fashion because each layer of possibly new
+    // each region in an iterative fashion because each layer of possibly new
     // acceptors will possibly invalidate eligible donors for this region.
 
     // Algorithm:
@@ -169,12 +169,14 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
     //    2) Check whether all regions have satisfied the Donor Suitability
     //       Criterion as defined by its oversetFringe
     //    3) If they have, stop the iterative process, otherwise repeat.
+    //    4) Finalise overset assembly process by setting up donorCellsPtr_ and
+    //       acceptorCellsPtr_ for all regions
+
+    // Get all overset regions
+    PtrList<oversetRegion>& regions = oversetMesh_.regions();
 
     do
     {
-        // Get all overset regions
-        PtrList<oversetRegion>& regions = oversetMesh_.regions();
-
         // Flag indicating that a suitable overlap has been found
         bool foundOverlap = true;
 
@@ -185,14 +187,21 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
             oversetRegion& curRegion = regions[orI];
 
             // Update donor/acceptors for this region.
-            // Note 1: oversetRegion::updateDonorAcceptor() actually allocates
-            // donorCellsPtr_ and acceptorCellsPtr_ after its finished with the
-            // process,
-            // Note 2: updateDonorAcceptors() returns a bool indicating whether
+            // Note: updateDonorAcceptors() returns a bool indicating whether
             // a suitable overlap is found for this particular region
             foundOverlap &= curRegion.updateDonorAcceptors();
         }
     } while (!foundOverlap);
+
+    // Since a suitable overlap has been found, set-up donor/acceptor fields for
+    // all regions
+    forAll (regions, orI)
+    {
+        // Calling finaliseDonorAcceptor will take the latest set of suitable
+        // donors/acceptors from its fringe algorithm and combine them into
+        // donorCellsPtr_ and acceptorCellsPtr_
+        regions[orI].finaliseDonorAcceptors();
+    }
 }
 
 
@@ -734,17 +743,8 @@ void Foam::oversetRegion::clearOut() const
 }
 
 
-bool Foam::oversetRegion::updateDonorAcceptors()
+bool Foam::oversetRegion::updateDonorAcceptors() const
 {
-    // Initialise pointers if they are NULL
-    if (!donorCellsPtr_ || !acceptorCellsPtr_)
-    {
-        // Null construct - sizes are unknown until the overset fringe assembly
-        // is finished
-        donorCellsPtr_ = new donorAcceptorList();
-        acceptorCellsPtr_ = new donorAcceptorList();
-    }
-
     // If a suitable fringe on this region has been found, simply return true
     if (fringePtr_->foundSuitableOverlap())
     {
@@ -757,7 +757,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     //    -----SENDING/RECEIVING ACCEPTORS PART-----
     //
     // 2) We need to calculate the sending map for acceptors, which tells me
-    //    which acceptors points I need to send to which processor:
+    //    which acceptors I need to send to which processor:
     //    - Loop through acceptors for this region and through all donor regions
     //    - Using the processor bounding boxes, figure out where to send this
     //      acceptor (there is no need to send the acceptor if the acceptor
@@ -766,7 +766,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     //      into the DynamicList
     //    - While looping through acceptors, count how many acceptors I'm
     //      sending to each processor
-    // 3) Count how many acceptor points my (local) processor is going to be
+    // 3) Count how many acceptors my (local) processor is going to be
     //    receiving from all other processors
     // 4) Create a constructing map for acceptors, organized as follows:
     //    - If processor N sends me M acceptor points, these points will be
@@ -832,11 +832,11 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     forAll (localAcceptorDonorList, aI)
     {
         localAcceptorDonorList[aI] = donorAcceptor
-            (
-                a[aI],
-                Pstream::myProcNo(),
-                cc[a[aI]]
-            );
+        (
+            a[aI],
+            Pstream::myProcNo(),
+            cc[a[aI]]
+        );
     }
 
     // Create list containing number of acceptors my processor is sending to
@@ -924,7 +924,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     Pstream::gatherList(nAcceptorsToProcessorMap);
     Pstream::scatterList(nAcceptorsToProcessorMap);
 
-    // Count how many acceptor points I'm going to be receiving from others
+    // Count how many acceptors I'm going to receive from others
     label nAcceptorReceives = 0;
     forAll (nAcceptorsToProcessorMap, procI)
     {
@@ -938,14 +938,14 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     // received by previous processors.
     // Example:
     /*
-       Procs sending to me | Number of items being sent
-      --------------------------------------------------
-              P0           |             1
-              P1           |             7
-              P5           |             2
-              .            |             .
-              .            |             .
-              .            |             .
+        Procs sending to me | Number of items being sent
+        ------------------------------------------------
+               P0           |             1
+               P1           |             7
+               P5           |             2
+               .            |             .
+               .            |             .
+               .            |             .
 
         Received data has the following form:
         (
@@ -1046,7 +1046,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
 
             // Find nearest donor cell with octree. Note: octree only
             // contains eligible cells.  HJ, 10/Jan/2015.
-            pointIndexHit pih = tree.findNearest(curP, span);
+            const pointIndexHit pih = tree.findNearest(curP, span);
 
             if (pih.hit())
             {
@@ -1057,7 +1057,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
                 // taking a closer hit
 
                 // Get index obtained by octree
-                const label& donorCandidateIndex = pih.index();
+                const label donorCandidateIndex = pih.index();
 
                 if
                 (
@@ -1093,7 +1093,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
                     // octree, issue a warning
                     WarningIn
                     (
-                        "void oversetRegion::calcDonorAcceptorCells() const"
+                        "void oversetRegion::updateDonorAcceptors() const"
                     )   << "Could not find a hit for acceptor,"
                         << "donor may remain invalid."
                         << endl;
@@ -1168,7 +1168,7 @@ bool Foam::oversetRegion::updateDonorAcceptors()
         true // reuse maps
     );
 
-    // Distribute donor/acceptor pairs, for initial N acceptors I have send
+    // Distribute donor/acceptor pairs, for initial N acceptors I have sent
     // accross certain processors, I will receive M donor/acceptor pairs,
     // where M >= N.
     donorDistribution.distribute(receivedAcceptorDonorList);
@@ -1176,27 +1176,33 @@ bool Foam::oversetRegion::updateDonorAcceptors()
     // Use an alias (reference) from now on for clarity
     donorAcceptorList& completeDonorAcceptorList = receivedAcceptorDonorList;
 
-    // MISSING: NEED TO RECOMBINE THE DATA! completeDonorAcceptorList has more
-    // entries than the original acceptor list because donors from multiple
-    // processors are possible and we need to make a choice...
+    // STAGE 11: Finish the iteration by updating the fringe, which will
+    // actually hold final and some intermediate steps for donor/acceptor
+    // assembly process
 
-    // STAGE 11: Finish the iteration by updating the fringe and local
-    // donor/acceptor lists
-
-    // Update fringe
-    bool suitableOverlapFound = fringePtr_->updateIteration(bareDonors);
-
-    if (suitableOverlapFound)
-    {
-        // Suitable overlap has been found, populate local donor/acceptor lists
-        donorAcceptorList& localDonorCells = *donorCellsPtr_;
-        donorAcceptorList& localAcceptorCells = *acceptorCellsPtr_;
-
-        // MISSING: gather/scatter the list and each processor populates its own
-        // part
-    }
+    bool suitableOverlapFound =
+        fringePtr_->updateIteration(completeDonorAcceptorList);
 
     return suitableOverlapFound;
+}
+
+
+void Foam::oversetRegion::finaliseDonorAcceptors() const
+{
+    // Check the state of pointers (if someone calls this function from some
+    // member function other than calcDonorAcceptorCells)
+    if (donorCellsPtr_ || acceptorCellsPtr_)
+    {
+        FatalErrorIn("void oversetRegion::finaliseDonorAcceptors() const")
+            << "Donor/acceptor cells already calculated. Make sure you have "
+            << "called this function from calcAcceptorsDonors only."
+            << abort(FatalError);
+    }
+
+    // MISSING: need to fetch final donor/acceptor pair from fringe and
+    // recombine donor cells for parallel run (donorCellsPtr_ will hold a list
+    // containing cells where the donor is local and acceptor is possibly
+    // remote)
 }
 
 
