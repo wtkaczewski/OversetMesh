@@ -823,7 +823,7 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
     // STAGE 1: Start iteration for this region
 
     // Get current and local acceptor cells from oversetFringe
-    const labelList& a = fringePtr_->curAcceptors();
+    const labelList& a = fringePtr_->acceptors();
 
     // Create a list of local acceptors (holding acceptors on this processor and
     // donors on possibly remote processor)
@@ -1283,8 +1283,10 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
     // actually hold final and some intermediate steps for donor/acceptor
     // assembly process
 
+    // Note, may invalidate the argument list depending on the fringe
+    // algorithm that is used
     bool suitableOverlapFound =
-        fringePtr_->updateIteration(completeDonorAcceptorList);
+        fringePtr_->updateIteration(combinedDonorAcceptorList);
 
     return suitableOverlapFound;
 }

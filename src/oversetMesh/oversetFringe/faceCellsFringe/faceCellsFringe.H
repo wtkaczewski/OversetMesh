@@ -31,6 +31,9 @@ Description
 Author
     Hrvoje Jasak, Wikki Ltd.  All rights reserved.
 
+Contributor
+    Vuko Vukcevic, Wikki Ltd.  All rights reserved.
+
 SourceFiles
     faceCellsFringe.C
 
@@ -64,6 +67,10 @@ class faceCellsFringe
 
         //- Acceptor cells
         mutable labelList* acceptorsPtr_;
+
+        //- Switch whether to update acceptors/donors for possible changes in
+        //  patch cells (switched off by default)
+        const Switch updateFringe_;
 
 
     // Private Member Functions
@@ -105,6 +112,12 @@ public:
 
 
     // Member Functions
+
+        //- Update iteration. Note: invalidates parameter
+        virtual void updateIteration
+        (
+            donorAcceptorList& donorAcceptorRegionData
+        );
 
         //- Return list of deactivated (hole) cells
         //  Fringe hole cells are collected in addition to geometric hole

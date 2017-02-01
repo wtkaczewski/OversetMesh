@@ -133,7 +133,11 @@ Foam::manualFringe::manualFringe
     holesSetName_(dict.lookup("holes")),
     acceptorsSetName_(dict.lookup("acceptors")),
     fringeHolesPtr_(NULL),
-    acceptorsPtr_(NULL)
+    acceptorsPtr_(NULL),
+    updateFringe_
+    (
+        dict.lookupOrDefault<Switch>("updateAcceptors", false)
+    )
 {}
 
 
@@ -146,6 +150,13 @@ Foam::manualFringe::~manualFringe()
 
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
+
+void Foam::updateIteration(donorAcceptorList& donorAcceptorRegionData)
+{
+    // Simply transfer the contents of the argument list to member list
+    finalDonorAcceptors().transfer(donorAcceptorRegionData);
+}
+
 
 const Foam::labelList& Foam::manualFringe::fringeHoles() const
 {
@@ -171,9 +182,12 @@ const Foam::labelList& Foam::manualFringe::acceptors() const
 
 void Foam::manualFringe::update() const
 {
-    Info<< "manualFringe::update() const" << endl;
+    if (updateFringe_)
+    {
+        Info<< "manualFringe::update() const" << endl;
 
-    clearAddressing();
+        clearAddressing();
+    }
 }
 
 

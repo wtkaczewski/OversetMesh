@@ -31,6 +31,9 @@ Description
 Author
     Hrvoje Jasak, Wikki Ltd.  All rights reserved.
 
+Contributor
+    Vuko Vukcevic, Wikki Ltd.  All rights reserved.
+
 SourceFiles
     manualFringe.C
 
@@ -63,10 +66,14 @@ class manualFringe
         word acceptorsSetName_;
 
         //- Hole cells
-        mutable labelList* fringeHolesPtr_;
+        labelList fringeHolesPtr_;
 
         //- Acceptor cells
         mutable labelList* acceptorsPtr_;
+
+        //- Switch whether to update acceptors/donors for possible changes in
+        //  cell sets (switched off by default)
+        const Switch updateFringeCellSets_;
 
 
     // Private Member Functions
@@ -108,6 +115,12 @@ public:
 
 
     // Member Functions
+
+        //- Update iteration. Note: invalidates parameter
+        virtual void updateIteration
+        (
+            donorAcceptorList& donorAcceptorRegionData
+        );
 
         //- Return list of deactivated (hole) cells
         //  Fringe hole cells are collected in addition to geometric hole

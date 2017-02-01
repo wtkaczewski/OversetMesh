@@ -32,13 +32,15 @@ Description
     - is owned by a particular oversetRegion
     - defines the hole cells for its region
     - defines acceptor cells for its region
-
-    Donor cells are calculated by oversetRegion, using a list of
-    acceptor cells and
-
+    - controls the iterative process for finding suitable overlap (as needed by
+      overlapFringe algorithm)
+    - defines donorAcceptorList used by oversetRegion to create combined data
 
 Author
     Hrvoje Jasak, Wikki Ltd.  All rights reserved.
+
+Contributor
+    Vuko Vukcevic, Wikki Ltd.  All rights reserved.
 
 SourceFiles
     oversetFringe.C
@@ -53,6 +55,7 @@ SourceFiles
 #include "fvMesh.H"
 #include "typeInfo.H"
 #include "runTimeSelectionTables.H"
+#include "donorAcceptorList.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -75,6 +78,12 @@ class oversetFringe
         //- Reference to oversetRegion
         const oversetRegion& region_;
 
+        //- Final donor/acceptor pairs for this region (fringe)
+        donorAcceptorDynamicList finalDonorAcceptors_;
+
+        //- Flag indicating whether a suitable overlap has been found
+        bool foundSuitableOverlap_;
+
 
     // Private Member Functions
 
@@ -83,6 +92,17 @@ class oversetFringe
 
         //- Disallow default bitwise assignment
         void operator=(const oversetFringe&);
+
+
+protected:
+
+    // Protected Member Functions
+
+        //- Access to final donor acceptor pair
+        donorAcceptorDynamicList& finalDonorAcceptors()
+        {
+            return finalDonorAcceptors_;
+        }
 
 
 public:
@@ -145,17 +165,56 @@ public:
                 return mesh_;
             }
 
-            //- Return access to region
-            const oversetRegion& region() const;
+            //- Return reference to region
+            const oversetRegion& region() const
+            {
+                return region_;
+            }
+
+            //- Return reference to final donor acceptor pairs
+            const donorAcceptorDynamicList& finalDonorAcceptors() const
+            {
+                if (!foundSuitableOverlap_)
+                {
+                    FatalErrorIn("oversetFringe::finalDonorAcceptors()")
+                        << "Requesting access to final donor/acceptor pairs "
+                        << "for region: " << region_.name() << ", but the "
+                        << "fringe has not been calculated yet."
+                        << nl
+                        << "The function should only be called from "
+                        << "oversetRegion::finaliseDonorAcceptors()."
+                        << abort(FatalError);
+                }
+
+                return finalDonorAcceptors_;
+            }
 
 
-        //- Return list of deactivated (hole) cells
-        //  Fringe hole cells are collected in addition to geometric hole
-        //  cells, which fall outside of all donor regions
-        virtual const labelList& fringeHoles() const = 0;
+        // Iteration control
 
-        //- Return list of acceptor cells
-        virtual const labelList& acceptors() const = 0;
+            //- Has a suitable overlap been found for this fringe (region)?
+            bool foundSuitableOverlap() const
+            {
+                return foundSuitableOverlap_;
+            }
+
+            //- Update iteration
+            virtual void updateIteration
+            (
+                donorAcceptorList& donorAcceptorRegionData
+            ) = 0;
+
+
+        // Access to fringe data
+
+            //- Return list of deactivated (hole) cells
+            //  Fringe hole cells are collected in addition to geometric hole
+            //  cells, which fall outside of all donor regions
+            virtual const labelList& fringeHoles() const = 0;
+
+            //- Return list of acceptor cells
+            virtual const labelList& acceptors() const = 0;
+
 
         //- Update the fringe
         virtual void update() const = 0;

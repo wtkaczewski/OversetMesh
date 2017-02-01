@@ -94,7 +94,7 @@ void Foam::faceCellsFringe::calcAddressing() const
     // Collect acceptors
     acceptorsPtr_ = new labelList(acceptorSet.sortedToc());
 
-    // Holes currently empty
+    // Holes are empty for this fringe
     fringeHolesPtr_ = new labelList();
 }
 
@@ -119,7 +119,11 @@ Foam::faceCellsFringe::faceCellsFringe
     oversetFringe(mesh, region, dict),
     patchNames_(dict.lookup("patches")),
     fringeHolesPtr_(NULL),
-    acceptorsPtr_(NULL)
+    acceptorsPtr_(NULL),
+    updateFringe_
+    (
+        dict.lookupOrDefault<Switch>("updateAcceptors", false)
+    )
 {}
 
 
@@ -132,6 +136,13 @@ Foam::faceCellsFringe::~faceCellsFringe()
 
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
+
+void Foam::updateIteration(donorAcceptorList& donorAcceptorRegionData)
+{
+    // Simply transfer the contents of the argument list to member list
+    finalDonorAcceptors().transfer(donorAcceptorRegionData);
+}
+
 
 const Foam::labelList& Foam::faceCellsFringe::fringeHoles() const
 {
@@ -157,9 +168,12 @@ const Foam::labelList& Foam::faceCellsFringe::acceptors() const
 
 void Foam::faceCellsFringe::update() const
 {
-    Info<< "faceCellsFringe::update() const" << endl;
+    if (updateFringe_)
+    {
+        Info<< "faceCellsFringe::update() const" << endl;
 
-    clearAddressing();
+        clearAddressing();
+    }
 }
 
 

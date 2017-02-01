@@ -36,8 +36,14 @@ Description
 
     Overset region provides data on
     - cells within region (local processor)
-    - local acceptor and hole cells
+    - local acceptor, donor and hole cells
     - eligible local donors: cells that are neither acceptors nor holes
+
+Author
+    Hrvoje Jasak, Wikki Ltd.  All rights reserved.
+
+Contributor
+    Vuko Vukcevic, Wikki Ltd.  All rights reserved.
 
 SourceFiles
     oversetRegion.C
