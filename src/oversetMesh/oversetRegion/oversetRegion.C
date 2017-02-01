@@ -796,13 +796,14 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
     //      number of donor points received from previous processors (processors
     //      I, where I < N)
     // 10) Create mapDistribute object and distribute donor data
+    // 11) Filter possibly multiple remote donors (coming from different
+    //     processors) for all acceptors
     //
     //    -----FRINGE HANDLING-----
     //
-    // 11) Pass new batch of donor/acceptor pairs to fringe algorithm,
+    // 12) Pass new batch of donor/acceptor pairs to fringe algorithm,
     //     which does its own magic (donor suitability, iteration control,
-    //     update of eligible donors...) and then update donor/acceptor lists if
-    //     a suitable fringe has been found
+    //     update of eligible donors...)
 
     // Get mesh data
     const vectorField& cc = mesh_.cellCentres();
@@ -833,7 +834,9 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
     {
         localAcceptorDonorList[aI] = donorAcceptor
         (
-            a[aI],
+            aI, // Note: storing index in the local acceptor list (not the
+                // cell index!). Done this way for easier filtering of
+                // multiple donors in STAGE 11
             Pstream::myProcNo(),
             cc[a[aI]]
         );
@@ -1085,19 +1088,16 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
                 // Note: consider removing pointInCellBB since it now has
                 // precedence over distance criterion.  VV, 31/Jan/2017.
             }
-            else
+            else if (oversetMesh::debug && !daPair.donorFound())
             {
-                if (!daPair.donorFound())
-                {
-                    // This donor is not valid and I did not find a hit in
-                    // octree, issue a warning
-                    WarningIn
-                    (
-                        "void oversetRegion::updateDonorAcceptors() const"
-                    )   << "Could not find a hit for acceptor,"
-                        << "donor may remain invalid."
-                        << endl;
-                }
+                // This donor is not valid and I did not find a hit in
+                // octree, issue a warning
+                WarningIn
+                (
+                    "void oversetRegion::updateDonorAcceptors() const"
+                )   << "Could not find a hit for acceptor,"
+                    << "donor may remain invalid."
+                    << endl;
             }
         } // End for all acceptor cell centres
     } // End for all donor regions
@@ -1176,7 +1176,110 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
     // Use an alias (reference) from now on for clarity
     donorAcceptorList& completeDonorAcceptorList = receivedAcceptorDonorList;
 
-    // STAGE 11: Finish the iteration by updating the fringe, which will
+    // Before filtering, check whether all received donors are actually for
+    // acceptors on this processor. If not, something went terribly wrong. Used
+    // for testing/debugging parallel comms
+    if (oversetMesh::debug)
+    {
+        forAll (completeDonorAcceptors, daI)
+        {
+            if
+            (
+                completeDonorAcceptors[daI].acceptorProcNo()
+             != Pstream::myProcNo()
+            )
+            {
+                FatalErrorIn("void oversetRegion::updateDonorAcceptors() const")
+                    << "Received donor/acceptor pair where acceptor belongs to "
+                    << "a different processor. " << nl
+                    << "My processor number: " << Pstream::myProcNo()
+                    << "Acceptor processor number: "
+                    << completeDonorAcceptors[daI].acceptorProcNo()
+                    << abort(FatalError);
+            }
+        }
+    }
+
+    // STAGE 11: Filter possibly multiple remote donors
+
+    // Create a masking field indicating that a certain acceptor has been
+    // visited
+    boolList isVisited(a.size(), false);
+
+    // Create a combined donor acceptor list, only containing best donors for
+    // current acceptors.
+    donorAcceptorList combinedDonorAcceptorList(a.size());
+
+    // Loop through donor/acceptor list
+    forAll (completeDonorAcceptorList, daI)
+    {
+        // Get current donor/acceptor pair
+        const donorAcceptor& curDA = completeDonorAcceptorList[daI];
+
+        // Get current acceptor index (not the cell index, but the index into
+        // the current acceptor list). See STAGE 1
+        const label& aI = curDA.acceptorCell();
+
+        // Get the flag indicating whether the acceptor has been visited or not
+        bool& acceptorVisited = isVisited[aI];
+
+        // Get current combined donor/acceptor pair
+        donorAcceptor& curDACombined = combinedDonorAcceptorList[aI];
+
+        if (!acceptorVisited)
+        {
+            // This acceptor has not been previously visited, set it in the
+            // combined list
+            curDACombined = curDa;
+
+            // Set the correct cell index in the combined list
+            curDACombined.acceptorCell() = a[aI];
+
+            // Mark as visited
+            acceptorVisited = true;
+        }
+        else
+        {
+            // This acceptor has been previously visited, meaning we have to
+            // make a choice whether to update it or not. At this point, the
+            // choice will be based on least distance from acceptor cell centre
+            // to donor cell centre. Run-time selectable Donor Suitability
+            // Functions will be applied in oversetFringe
+            if (curDA.distance() < curDACombined.distance())
+            {
+                // This is a better candidate for the same acceptor, set donor
+                // accordingly
+                curDACombined.setDonor
+                (
+                    curDA.donorCell(),
+                    curDA.donorProcNo(),
+                    curDA.donorPoint()
+                );
+            }
+        }
+    }
+
+    // Check whether all acceptors have been visited. Used for testing/debugging
+    // parallel comms
+    if (oversetMesh::debug)
+    {
+        bool allVisited = true;
+
+        forAll (isVisited, aI)
+        {
+            allVisited &= isVisited;
+        }
+
+        if (!allVisited)
+        {
+            FatalErrorIn("void oversetRegion::updateDonorAcceptors() const")
+                << "Did not visit all acceptors when recombining data..." << nl
+                << "Something went wrong."
+                << abort(FatalError);
+        }
+    }
+
+    // STAGE 12: Finish the iteration by updating the fringe, which will
     // actually hold final and some intermediate steps for donor/acceptor
     // assembly process
 
