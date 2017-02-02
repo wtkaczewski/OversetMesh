@@ -1057,6 +1057,13 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
         const indexedOctree<treeDataCell>& tree =
             curDonorRegion.cellSearch();
 
+        // It is possible that an octree is empty (if there are no eligible
+        // donor cells on this processor), do not search
+        if (tree.nodes().empty())
+        {
+            continue;
+        }
+
         const scalar span = tree.bb().mag();
 
         // Loop through received acceptor data
@@ -1510,7 +1517,8 @@ Foam::oversetRegion::oversetRegion
 
     localBoundsPtr_(NULL),
     globalBoundsPtr_(NULL),
-    cellSearchPtr_(NULL)
+    cellSearchPtr_(NULL),
+    procBoundBoxesPtr_(NULL)
 {
     // Check zone index
     if (zoneIndex_ < 0)
