@@ -178,8 +178,9 @@ public:
                 return foundSuitableOverlap_;
             }
 
-            //- Update iteration
-            virtual void updateIteration
+            //- Update iteration, returns whether a suitable fringe has been
+            //  found
+            virtual bool updateIteration
             (
                 donorAcceptorList& donorAcceptorRegionData
             ) const = 0;
@@ -196,7 +197,7 @@ public:
             virtual const labelList& acceptors() const = 0;
 
             //- Return reference to final donor acceptor pairs
-            virtual const donorAcceptorList& finalDonorAcceptors() const = 0;
+            virtual donorAcceptorList& finalDonorAcceptors() const = 0;
       
 
         //- Update the fringe

@@ -158,7 +158,7 @@ Foam::compositeFringe::~compositeFringe()
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
-void Foam::compositeFringe::updateIteration
+bool Foam::compositeFringe::updateIteration
 (
     donorAcceptorList& donorAcceptorRegionData
 ) const
@@ -182,8 +182,10 @@ void Foam::compositeFringe::updateIteration
         true
     );
 
-    // Set the flag to true
+    // Set the flag to true and return
     foundSuitableOverlap() = true;
+
+    return foundSuitableOverlap();
 }
 
 
@@ -206,6 +208,29 @@ const Foam::labelList& Foam::compositeFringe::acceptors() const
     }
 
     return *acceptorsPtr_;
+}
+
+
+Foam::donorAcceptorList& Foam::compositeFringe::finalDonorAcceptors() const
+{
+    if (!finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("compositeFringe::finalDonorAcceptors()")
+            << "finalDonorAcceptorPtr_ not allocated. Make sure you have "
+            << "called compositeFringe::updateIteration() before asking for "
+            << "final set of donor/acceptor pairs."
+            << abort(FatalError);
+    }
+
+    if (!foundSuitableOverlap())
+    {
+        FatalErrorIn("compositeFringe::finalDonorAcceptors()")
+            << "Attemted to access finalDonorAcceptors but suitable overlap "
+            << "has not been found. This is not allowed. "
+            << abort(FatalError);
+    }
+
+    return *finalDonorAcceptorsPtr_;
 }
 
 

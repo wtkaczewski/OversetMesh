@@ -153,7 +153,7 @@ Foam::manualFringe::~manualFringe()
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
-void Foam::manualFringe::updateIteration
+bool Foam::manualFringe::updateIteration
 (
     donorAcceptorList& donorAcceptorRegionData
 ) const
@@ -163,7 +163,7 @@ void Foam::manualFringe::updateIteration
     // more than once, which should not happen for manualFringe
     if (finalDonorAcceptorsPtr_)
     {
-        FatalErrorIn("manualFringe::updateIteration(donorAcceptorList&")
+        FatalErrorIn("manualFringe::updateIteration(donorAcceptorList&)")
             << "finalDonorAcceptorPtr_ already allocated. Something went "
             << "wrong with the iteration procedure (flag was not updated)."
             << nl << "This should not happen for manualFringe."
@@ -177,8 +177,10 @@ void Foam::manualFringe::updateIteration
         true
     );
 
-    // Set the flag to true
+    // Set the flag to true and return
     foundSuitableOverlap() = true;
+
+    return foundSuitableOverlap();
 }
 
 
@@ -201,6 +203,29 @@ const Foam::labelList& Foam::manualFringe::acceptors() const
     }
 
     return *acceptorsPtr_;
+}
+
+
+Foam::donorAcceptorList& Foam::manualFringe::finalDonorAcceptors() const
+{
+    if (!finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("manualFringe::finalDonorAcceptors()")
+            << "finalDonorAcceptorPtr_ not allocated. Make sure you have "
+            << "called manualFringe::updateIteration() before asking for "
+            << "final set of donor/acceptor pairs."
+            << abort(FatalError);
+    }
+
+    if (!foundSuitableOverlap())
+    {
+        FatalErrorIn("manualFringe::finalDonorAcceptors()")
+            << "Attemted to access finalDonorAcceptors but suitable overlap "
+            << "has not been found. This is not allowed. "
+            << abort(FatalError);
+    }
+
+    return *finalDonorAcceptorsPtr_;
 }
 
 

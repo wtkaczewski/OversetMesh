@@ -139,7 +139,7 @@ Foam::faceCellsFringe::~faceCellsFringe()
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
-void Foam::faceCellsFringe::updateIteration
+bool Foam::faceCellsFringe::updateIteration
 (
     donorAcceptorList& donorAcceptorRegionData
 ) const
@@ -163,8 +163,10 @@ void Foam::faceCellsFringe::updateIteration
         true
     );
 
-    // Set the flag to true
+    // Set the flag to true and return
     foundSuitableOverlap() = true;
+
+    return foundSuitableOverlap();
 }
 
 
@@ -187,6 +189,29 @@ const Foam::labelList& Foam::faceCellsFringe::acceptors() const
     }
 
     return *acceptorsPtr_;
+}
+
+
+Foam::donorAcceptorList& Foam::faceCellsFringe::finalDonorAcceptors() const
+{
+    if (!finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("faceCellsFringe::finalDonorAcceptors()")
+            << "finalDonorAcceptorPtr_ not allocated. Make sure you have "
+            << "called faceCellsFringe::updateIteration() before asking for "
+            << "final set of donor/acceptor pairs."
+            << abort(FatalError);
+    }
+
+    if (!foundSuitableOverlap())
+    {
+        FatalErrorIn("faceCellsFringe::finalDonorAcceptors()")
+            << "Attemted to access finalDonorAcceptors but suitable overlap "
+            << "has not been found. This is not allowed. "
+            << abort(FatalError);
+    }
+
+    return *finalDonorAcceptorsPtr_;
 }
 
 

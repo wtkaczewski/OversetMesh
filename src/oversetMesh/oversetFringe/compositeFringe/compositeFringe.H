@@ -117,7 +117,7 @@ public:
     // Member Functions
 
         //- Update iteration. Note: invalidates parameter
-        virtual void updateIteration
+        virtual bool updateIteration
         (
             donorAcceptorList& donorAcceptorRegionData
         ) const;
@@ -130,8 +130,9 @@ public:
         //- Return list of acceptor cells
         virtual const labelList& acceptors() const;
 
-        //- Return list of final donor acceptor pairs
-        virtual const donorAcceptorList& finalDonorAcceptors() const;
+        //- Return list of final donor acceptor pairs. Note: may invalidate
+        //  finalDonorAcceptorsPtr_ for optimisation purposes
+        virtual donorAcceptorList& finalDonorAcceptors() const;
 
         //- Update the fringe
         virtual void update() const;
