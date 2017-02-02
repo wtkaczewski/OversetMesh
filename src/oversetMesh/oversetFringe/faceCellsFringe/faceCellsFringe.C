@@ -164,7 +164,7 @@ bool Foam::faceCellsFringe::updateIteration
     );
 
     // Set the flag to true and return
-    foundSuitableOverlap() = true;
+    updateSuitableOverlapFlag(true);
 
     return foundSuitableOverlap();
 }
@@ -225,7 +225,7 @@ void Foam::faceCellsFringe::update() const
         clearAddressing();
 
         // Set flag to false
-        foundSuitableOverlap() = false;
+        updateSuitableOverlapFlag(false);
     }
 }
 

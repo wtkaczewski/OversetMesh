@@ -173,18 +173,21 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
     //       acceptorCellsPtr_ for all regions
 
     // Get all overset regions
-    PtrList<oversetRegion>& regions = oversetMesh_.regions();
+    const PtrList<oversetRegion>& regions = oversetMesh_.regions();
+
+    // Flag indicating that a suitable overlap has been found
+    bool foundOverlap;
 
     do
     {
-        // Flag indicating that a suitable overlap has been found
-        bool foundOverlap = true;
+        // Set flag to true
+        foundOverlap = true;
 
         // Loop through all regions
         forAll (regions, orI)
         {
             // Get current region
-            oversetRegion& curRegion = regions[orI];
+            const oversetRegion& curRegion = regions[orI];
 
             // Update donor/acceptors for this region.
             // Note: updateDonorAcceptors() returns a bool indicating whether
@@ -869,7 +872,7 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
 
     // Initialize sending map: for each processor, create a DynamicList of
     // acceptors that need to be sent to that processor
-    List<dynamicLabelList>& sendAcceptorMap(Pstream::nProcs());
+    List<dynamicLabelList> sendAcceptorMap(Pstream::nProcs());
 
     // Allocate enough storage as if we are sending all acceptors to all
     // processors (trading off memory for performance)
@@ -886,7 +889,7 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
             procRegionBB[procI];
 
         // Get current processor send map
-        const dynamicLabelList& curSendMap = sendAcceptorMap[procI];
+        dynamicLabelList& curSendMap = sendAcceptorMap[procI];
 
         // Loop through all donor regions
         forAll (dr, drI)
@@ -912,7 +915,7 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
 
                     // Increment the number of acceptors I'm sending to this
                     // processor
-                    ++numberOfLocalAcceptorsToProc[procI];
+                    ++numberOfLocalAcceptorsToProcs[procI];
                 }
             } // End for all processors
         } // End for all donor regions
@@ -993,12 +996,22 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
 
     // STAGE 5: Distribute acceptor points
 
+    // Need to create a labelListList from List<dynamicLabelList> for sending
+    // map.
+    labelListList sendAcceptorFixedMap(Pstream::nProcs());
+    forAll (sendAcceptorFixedMap, procI)
+    {
+        // Transfer the content of dynamic list into this processor list,
+        // sendAcceptorMap is invalid from now on
+        sendAcceptorFixedMap[procI].transfer(sendAcceptorMap[procI]);
+    }
+
     // Create mapDistribute object for distributing acceptor points. Note:
     // reusing maps, meaning that arguments are invalid from now onward.
     mapDistribute acceptorDistribution
     (
         nAcceptorReceives,
-        sendAcceptorMap,
+        sendAcceptorFixedMap,
         constructAcceptorMap,
         true // reuse maps
     );
@@ -1133,7 +1146,7 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
     // received by processor j is the same as the number of acceptors sent
     // to processor j.
     label nDonorReceives = 0;
-    forAll(nAcceptorProcessorMap, procI)
+    forAll(nAcceptorsToProcessorMap, procI)
     {
         nDonorReceives +=
             nAcceptorsToProcessorMap[Pstream::myProcNo()][procI];
@@ -1197,11 +1210,11 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
     // for testing/debugging parallel comms
     if (oversetMesh::debug)
     {
-        forAll (completeDonorAcceptors, daI)
+        forAll (completeDonorAcceptorList, daI)
         {
             if
             (
-                completeDonorAcceptors[daI].acceptorProcNo()
+                completeDonorAcceptorList[daI].acceptorProcNo()
              != Pstream::myProcNo()
             )
             {
@@ -1210,7 +1223,7 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
                     << "a different processor. " << nl
                     << "My processor number: " << Pstream::myProcNo()
                     << "Acceptor processor number: "
-                    << completeDonorAcceptors[daI].acceptorProcNo()
+                    << completeDonorAcceptorList[daI].acceptorProcNo()
                     << abort(FatalError);
             }
         }
@@ -1246,7 +1259,7 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
         {
             // This acceptor has not been previously visited, set it in the
             // combined list
-            curDACombined = curDa;
+            curDACombined = curDA;
 
             // Set the correct cell index in the combined list
             curDACombined.acceptorCell() = a[aI];
@@ -1283,7 +1296,7 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
 
         forAll (isVisited, aI)
         {
-            allVisited &= isVisited;
+            allVisited &= isVisited[aI];
         }
 
         if (!allVisited)
@@ -1364,7 +1377,7 @@ void Foam::oversetRegion::finaliseDonorAcceptors() const
 
     // Initialize sending map: for each processor, create a DynamicList of
     // donor/acceptor pairs that need to be sent to that processor
-    List<dynamicLabelList>& sendMap(Pstream::nProcs());
+    List<dynamicLabelList> sendMap(Pstream::nProcs());
 
     // Allocate enough storage as if we are sending all pairs to all
     // processors (trading off memory for performance)
@@ -1437,12 +1450,22 @@ void Foam::oversetRegion::finaliseDonorAcceptors() const
 
     // STAGE 5: Distribute donor/acceptor pairs
 
+    // Need to create a labelListList from List<dynamicLabelList> for sending
+    // map.
+    labelListList sendFixedMap(Pstream::nProcs());
+    forAll (sendFixedMap, procI)
+    {
+        // Transfer the content of dynamic list into this processor list,
+        // sendMap is invalid from now on
+        sendFixedMap[procI].transfer(sendMap[procI]);
+    }
+
     // Create mapDistribute object. Note: reusing maps, meaning that arguments
     // are invalid from now onward.
     mapDistribute localAcceptorToLocalDonor
     (
         nReceives,
-        sendMap,
+        sendFixedMap,
         constructMap,
         true // reuse maps
     );

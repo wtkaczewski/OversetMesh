@@ -79,7 +79,7 @@ class oversetFringe
         const oversetRegion& region_;
 
         //- Flag indicating whether a suitable overlap has been found
-        bool foundSuitableOverlap_;
+        mutable bool foundSuitableOverlap_;
 
 
     // Private Member Functions
@@ -95,11 +95,11 @@ protected:
 
     // Protected Member Functions
 
-        //- Return access to the flag (set by derived classes during calls
-        //  to updateIteration()
-        bool& foundSuitableOverlap()
+        //- Set whether a suitable overlap has been found (called by derived
+        //  classes during calls to updateIteration())
+        void updateSuitableOverlapFlag(const bool isFound) const
         {
-            return foundSuitableOverlap_;
+            foundSuitableOverlap_ = isFound;
         }
 
 
@@ -198,7 +198,7 @@ public:
 
             //- Return reference to final donor acceptor pairs
             virtual donorAcceptorList& finalDonorAcceptors() const = 0;
-      
+
 
         //- Update the fringe
         virtual void update() const = 0;

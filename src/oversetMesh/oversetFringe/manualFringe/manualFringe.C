@@ -178,7 +178,7 @@ bool Foam::manualFringe::updateIteration
     );
 
     // Set the flag to true and return
-    foundSuitableOverlap() = true;
+    updateSuitableOverlapFlag(true);
 
     return foundSuitableOverlap();
 }
@@ -239,7 +239,7 @@ void Foam::manualFringe::update() const
         clearAddressing();
 
         // Set flag to false
-        foundSuitableOverlap() = false;
+        updateSuitableOverlapFlag(false);
     }
 }
 

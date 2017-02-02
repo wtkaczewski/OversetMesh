@@ -120,7 +120,7 @@ public:
         virtual bool updateIteration
         (
             donorAcceptorList& donorAcceptorRegionData
-        ) const
+        ) const;
 
         //- Return list of deactivated (hole) cells
         //  Fringe hole cells are collected in addition to geometric hole

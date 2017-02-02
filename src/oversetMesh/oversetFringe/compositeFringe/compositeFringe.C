@@ -120,7 +120,7 @@ void Foam::compositeFringe::calcAddressing() const
 }
 
 
-void Foam::compositeFringe::clearAddressing()
+void Foam::compositeFringe::clearAddressing() const
 {
     deleteDemandDrivenData(fringeHolesPtr_);
     deleteDemandDrivenData(acceptorsPtr_);
@@ -183,7 +183,7 @@ bool Foam::compositeFringe::updateIteration
     );
 
     // Set the flag to true and return
-    foundSuitableOverlap() = true;
+    updateSuitableOverlapFlag(true);
 
     return foundSuitableOverlap();
 }
@@ -241,12 +241,11 @@ void Foam::compositeFringe::update() const
     forAll (baseFringes_, bfI)
     {
         // Update current base fringe
-        oversetFringe& curFringe = baseFringes_[bfI];
-        curFringe.update();
-
-        // Update flag for composite fringe
-        foundSuitableOverlap &= curFringe.foundSuitableOverlap();
+        baseFringes_[bfI].update();
     }
+
+    // Update flag for composite fringe
+    updateSuitableOverlapFlag(false);
 }
 
 
