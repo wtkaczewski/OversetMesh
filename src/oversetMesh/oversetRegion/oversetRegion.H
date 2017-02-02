@@ -39,6 +39,48 @@ Description
     - local acceptor, donor and hole cells
     - eligible local donors: cells that are neither acceptors nor holes
 
+    Overset region controls the iterative process of fringe assembly with the
+    help of fringe selection algorithm. The flowchart of the algorithm is:
+    1. Someone (usually oversetMesh) asks region for donors and acceptors, which
+       triggers the lazy evaluation in calcDonorAcceptorCells(). During the
+       donor/acceptor assembly, all regions are interdependent because eligible
+       donors and holes could change during the iterative process. Hence, asking
+       a certain region for its donors/acceptors actually triggers the fringe
+       assembly in all regions,
+    2. The iterative process starts by going through each region, updating
+       current donor/acceptors (see updateDonorAcceptors) which does the
+       following:
+       - Asks fringe handler a set of "fresh" acceptors,
+       - Finds donors for these acceptors,
+       - Ships of donor/acceptor pairs to fringe handler, which decided whether
+         a suitable overlap has been found
+    3. If the suitable overlap has been found for ALL regions, then we finalise
+       the donor/acceptor pairs by calling finaliseDonorAcceptors(), which
+       actually allocates requested fields (acceptorCells and donorCells)
+
+Ideas to further improve efficiency
+    1. During the possibly iterative process of finding suitable overlap with
+       the help of fringe selection algorithm (see calcDonorAcceptorCells()), we
+       are sending/receiving full donorAcceptor objects. A single donor/acceptor
+       object holds: donor and acceptor cell numbers, processor IDs and cell
+       centres. On top of that, it holds additional "extended donors" for a
+       given acceptor, which is a list containing eligible neighbouring donors
+       for a given "master" donor (see donorAcceptor). Something might be gained
+       if we do the following:
+           - Create a bareDonorAcceptor class which will hold only the data
+             required by the iterative process (e.g. acceptor cell centre, donor
+             cell number, processor ID and cell centre). Then when the iterative
+             process is finished, simply finalise the data by extending bare
+             data and communicate it once again.
+           - As a first step, it would be sufficient just to remove the search
+             for extended donors during the iterative process.
+    2. I've written the iterative process in a way that it works both for serial
+       and parallel runs (enabled by mapDistribute class design), which means
+       that we might have significant overhead when doing serial runs due to
+       unnecessary allocations, indirections and access. I've written it this
+       way since I currently do not care about loss of efficiency for serial
+       runs. VV, 2/Feb/2017.
+
 Author
     Hrvoje Jasak, Wikki Ltd.  All rights reserved.
 

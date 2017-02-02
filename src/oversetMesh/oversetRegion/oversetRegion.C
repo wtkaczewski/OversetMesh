@@ -805,8 +805,9 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
     //     which does its own magic (donor suitability, iteration control,
     //     update of eligible donors...)
 
-    // Get mesh data
+    // Get necessary mesh data
     const vectorField& cc = mesh_.cellCentres();
+    const labelListList& cCells = mesh_.cellCells(); // For extended donors
 
     // Get donor regions
     const labelList& dr = donorRegions();
@@ -1031,6 +1032,13 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
         // of fringe assembly
         const labelList& curDonors = curDonorRegion.eligibleDonors();
 
+        // Mask eligible donors for extended neighbourhood search
+        boolList eligibleDonorMask(mesh_.nCells(), false);
+        forAll (curDonors, i)
+        {
+            eligibleDonorMask[curDonors[i]] = true;
+        }
+
         // Get donor region tree. Note: octree also depends on eligible
         // donors, updated at the end of iteration
         const indexedOctree<treeDataCell>& tree =
@@ -1082,6 +1090,14 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
                         curDonors[donorCandidateIndex],
                         Pstream::myProcNo(),
                         cc[curDonors[donorCandidateIndex]]
+                    );
+
+                    // Set extended donors
+                    daPair.setExtendedDonors
+                    (
+                        eligibleDonorMask,
+                        cCells,
+                        cc
                     );
                 }
 
