@@ -61,7 +61,7 @@ void Foam::faceCellsFringe::calcAddressing() const
     // Find patches and mark cells
     forAll (patchNames_, nameI)
     {
-        polyPatchID curFringePatch
+        const polyPatchID curFringePatch
         (
             patchNames_[nameI],
             mesh().boundaryMesh()

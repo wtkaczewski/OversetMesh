@@ -29,6 +29,7 @@ Description
     Overlap fringe algorithm
 
 Author
+    Vuko Vukcevic, Wikki Ltd.  All rights reserved.
     Hrvoje Jasak, Wikki Ltd.  All rights reserved.
 
 SourceFiles
@@ -64,14 +65,29 @@ class overlapFringe
         //- Acceptor cells
         mutable labelList* acceptorsPtr_;
 
-        //- Run-time selectable overlap minimisation algorithm
+        //- Final donor/acceptor pairs for this region (fringe)
+        mutable donorAcceptorList* finalDonorAcceptorsPtr_;
+
+        //- Run-time selectable donor/acceptor suitability handler
         autoPtr<donorSuitability::donorSuitability> donorSuitability_;
 
-    
-    //- Bounding box expansion factor. Eligible acceptor cells for the overlap
-    //  fringe are automatically collected as cells within bounding box of a
-    //  donor region. This bounding box is slightly expanded for robustness.
-    static const debug::optimisationSwitch boundBoxExpansionFactor;
+        //- List of patches to start the iterative fringe assembly process
+        //  (empty list by default)
+        wordList initPatchNames_;
+
+
+        // Data for cache control in order to make overlap fringe more efficient
+        // for moving mesh cases (restart acceptors/fringe holes with the ones
+        // from previous mesh configuration)
+
+            //- Switch to control cacheing
+            Switch cacheFringe_;
+
+            //- Cached fringe holes
+            mutable labelList* cachedFringeHolesPtr_;
+
+            //- Cached acceptors
+            mutable labelList* cachedAcceptorsPtr_;
 
 
     // Private Member Functions
@@ -114,6 +130,12 @@ public:
 
     // Member Functions
 
+        //- Update iteration.
+        virtual bool updateIteration
+        (
+            donorAcceptorList& donorAcceptorRegionData
+        ) const;
+
         //- Return list of hole cells
         //  Fringe hole cells are collected in addition to geometric hole
         //  cells, which fall outside of all donor regions
@@ -121,6 +143,10 @@ public:
 
         //- Return list of acceptor cells
         virtual const labelList& acceptors() const;
+
+        //- Return list of final donor acceptor pairs. Note: caller may
+        //  invalidate finalDonorAcceptorsPtr_ for optimisation purposes
+        virtual donorAcceptorList& finalDonorAcceptors() const;
 
         //- Update the fringe
         virtual void update() const;

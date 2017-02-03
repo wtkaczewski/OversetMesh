@@ -27,8 +27,8 @@ License
 #include "overlapFringe.H"
 #include "oversetRegion.H"
 #include "oversetMesh.H"
-#include "cellSet.H"
-#include "boxToCell.H"
+#include "polyPatchID.H"
+#include "processorFvPatchFields.H"
 #include "addToRunTimeSelectionTable.H"
 
 // * * * * * * * * * * * * * * Static Data Members * * * * * * * * * * * * * //
@@ -39,445 +39,235 @@ namespace Foam
     addToRunTimeSelectionTable(oversetFringe, overlapFringe, dictionary);
 }
 
-
-const Foam::debug::optimisationSwitch
-Foam::overlapFringe::boundBoxExpansionFactor
-(
-    "boundBoxExpansionFactor",
-    0.02 // 2 percent of the bounding box span
-);
-
-
 // * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //
 
 void Foam::overlapFringe::calcAddressing() const
 {
-    if (acceptorsPtr_)
+    if (fringeHolesPtr_ || acceptorsPtr_)
     {
         FatalErrorIn("void overlapFringe::calcAddressing() const")
-            << "Acceptor addressing already calculated"
+            << "Fringe addressing already calculated"
             << abort(FatalError);
     }
 
-    Info<< "overlapFringe::calcAddressing" << endl;
-
-    // Algorithm
-    // - visit all donor regions of the master (= current) region
-    // - for each donor region, mark live cells that can be donors,
-    //   excluding hole cells
-    // - for all cells of master region find whether they overlap with the
-    //   cells on the other sides and of which type:
-    //       - if hole, master cell is also a hole
-    //       - if live, master cell is acceptor
-
-    // Get mesh
-    const fvMesh& mesh = region().mesh();
-
-    // Get cell centres
-    const vectorField& cc = mesh.cellCentres();
-
-    // Prepare list of potential acceptor cells
-    labelList masterCells;
-
-    // Get donor regions
-    const labelList& dr = region().donorRegions();
-
-    // Memory management
+    if (cachedFringeHolesPtr_ && cachedAcceptorsPtr_)
     {
-        // Create an empty cell set which will contain eligible acceptors
-        cellSet eligibleAcceptorSet
-        (
-            mesh,
-            "eligibleAcceptorCellSet",
-            region().regionCells().size() // Reasonable size estimate
-        );
+        // Simply re-use cached holes and acceptors for this iteration and
+        // invalidate the pointers to cached fields
+        fringeHolesPtr_ = cachedFringeHolesPtr_;
+        cachedFringeHolesPtr_ = NULL;
 
-        // Loop through all regions and populate the cell set according to
-        // bounding boxes of a region
-        forAll(dr, drI)
-        {
-            // Get local bounds of this region
-            boundBox regionBB =
-                region().overset().regions()[dr[drI]].globalBounds();
-
-            // Expand the bounding box a bit
-            const vector bbExpandVector =
-                boundBoxExpansionFactor()*regionBB.span();
-            regionBB.max() += bbExpandVector;
-            regionBB.min() -= bbExpandVector;
-
-            const boxToCell donorRegionBox
-            (
-                mesh,
-                treeBoundBox(regionBB)
-            );
-
-            // Add cells inside this bounding box to eligibleAcceptorSet
-            if (drI == 0)
-            {
-                donorRegionBox.applyToSet
-                (
-                    topoSetSource::NEW,
-                    eligibleAcceptorSet
-                );
-            }
-            else
-            {
-                donorRegionBox.applyToSet
-                (
-                    topoSetSource::ADD,
-                    eligibleAcceptorSet
-                );
-            }
-        }
-
-        // Remove donor region cells
-        const cellSet masterRegionSet
-        (
-            mesh,
-            "masterCellSet",
-            labelHashSet(region().regionCells())
-        );
-        eligibleAcceptorSet.subset(masterRegionSet);
-
-        // Get addressing for acceptor candidates from eligible acceptor set
-        masterCells = eligibleAcceptorSet.toc();
+        acceptorsPtr_ = cachedAcceptorsPtr_;
+        cachedAcceptorsPtr_ = NULL;
     }
-
-    // Get holes in form of mask
-    boolList holeMask(mesh.nCells(), false);
-
-    // Get and mark holes
-    const labelList& masterHoles = region().holes();
-
-    forAll (masterHoles, mhI)
+    else if (cachedFringeHolesPtr_ != cachedAcceptorsPtr_)
     {
-        holeMask[masterHoles[mhI]] = true;
-    }
-
-    // Collect all cells eligible to be acceptors
-    // Note: cells that act as donors for other regions should be excluded
-    // Not sure how to do this now.
-    // HJ, 15/Sep/2015
-
-    donorAcceptorList acCand(masterCells.size() - masterHoles.size());
-
-    label nAcCand = 0;
-
-    forAll (masterCells, mcI)
-    {
-        // If cell is not a hole, add it to candidates
-        if (!holeMask[masterCells[mcI]])
-        {
-            acCand[nAcCand] = donorAcceptor
-            (
-                masterCells[mcI],
-                Pstream::myProcNo(),
-                cc[masterCells[mcI]]
-            );
-
-            nAcCand++;
-        }
-    }
-
-    if (Pstream::parRun())
-    {
-        // Make a global list of all acceptors
-        donorAcceptorListList globalDonorAcceptor(Pstream::nProcs());
-
-        // Copy local acceptor list into processor slot
-        globalDonorAcceptor[Pstream::myProcNo()] = acCand;
-
-        // Gather-scatter acceptor data before donor indentification
-        Pstream::gatherList(globalDonorAcceptor);
-        Pstream::scatterList(globalDonorAcceptor);
-
-        // Donor identification: search for donors for all processors
-        // using local donor regions
-
-        // Go through all donor regions and identify donor cells
-        forAll (dr, drI)
-        {
-            if (dr[drI] == region().index())
-            {
-                FatalErrorIn("void overlapFringe::calcAddressing() const")
-                    << "Region " << region().name()
-                    << " specified as the donor of itself.  "
-                    << "List of donors: " << dr << nl
-                    << "This is not allowed: check oversetMesh definition"
-                    << abort(FatalError);
-            }
-
-            // Get reference to current donor region
-            const oversetRegion& curDonorRegion =
-                region().overset().regions()[dr[drI]];
-
-            const labelList& curDonors = curDonorRegion.eligibleDonors();
-
-            // Get donor tree
-            const indexedOctree<treeDataCell>& tree =
-                curDonorRegion.cellSearch();
-
-            // If the tree is empty on local processor, do not search
-            if (tree.nodes().empty())
-            {
-                continue;
-            }
-
-            scalar span = tree.bb().mag();
-
-            // Go through all processors and see if local donor can be found
-
-            // For all acceptors, perform donor search
-            // Searching for donor cells on local processors using the
-            // requested acceptor data from all processors
-            forAll (globalDonorAcceptor, procI)
-            {
-                List<donorAcceptor>& curDA = globalDonorAcceptor[procI];
-
-                forAll (curDA, daI)
-                {
-                    if (!curDA[daI].donorFound())
-                    {
-                        const vector& curP = curDA[daI].acceptorPoint();
-
-                        // Find nearest cell with octree
-                        // Note: octree only contains eligible cells
-                        // HJ, 10/Jan/2015
-                        pointIndexHit pih = tree.findNearest(curP, span);
-
-                        if (pih.hit())
-                        {
-                            // Note: this check needs to be improved because
-                            // pointInCell is not sufficiently robust.
-                            // HJ, 16/Sep/2015
-                            if
-                            (
-                                mesh.pointInCell
-                                (
-                                    curP,
-                                    curDonors[pih.index()]
-                                )
-                            )
-                            {
-                                // Found nearest cell in donor region.
-                                // This cell is a potential acceptor
-                                curDA[daI].setDonor
-                                (
-                                    curDonors[pih.index()],
-                                    Pstream::myProcNo(),
-                                    cc[curDonors[pih.index()]]
-                                );
-                            }
-                        }
-                    }
-                }
-            } // end for all processor lists
-        } // end for all dr
-
-        // Gather-scatter acceptor data after donor search
-
-        // At this point, each processor has filled parts of every other
-        // processors's list.  Therefore, a simple gather-scatter will not do
-        // Algorithm:
-        // - send all processor data to master
-        // - master recombines
-        // - scatter to all processors
-        if (Pstream::master())
-        {
-            // Receive data from all processors and recombine
-            for (label procI = 1; procI < Pstream::nProcs(); procI++)
-            {
-                // Receive list from slave
-                IPstream fromSlave
-                (
-                    Pstream::scheduled,
-                    procI
-                );
-
-                donorAcceptorListList otherDonorAcceptor(fromSlave);
-
-                // Perform recombination
-                // If slave has found the acceptor and recombined list
-                // did not, copy the data from the slave into the recombined
-                // list
-                // If two processors have found the acceptor, report error
-                forAll (globalDonorAcceptor, pI)
-                {
-                    // Get reference to recombined list
-                    donorAcceptorList& recombined =
-                        globalDonorAcceptor[pI];
-
-                    // Get reference to candidate list
-                    const donorAcceptorList& candidate =
-                        otherDonorAcceptor[pI];
-
-                    // Compare candidate with recombined list
-                    // If candidate has found the donor, record it in the
-                    // recombined list
-                    forAll (candidate, cI)
-                    {
-                        if (candidate[cI].donorFound())
-                        {
-                            if (!recombined[cI].donorFound())
-                            {
-                                // Candidate has found the donor
-                                // Record donor and donor processor
-                                recombined[cI].setDonor
-                                (
-                                    candidate[cI].donorCell(),
-                                    candidate[cI].donorProcNo(),
-                                    candidate[cI].donorPoint()
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        else
-        {
-            // Slave processor: send global list to master
-            OPstream toMaster
-            (
-                Pstream::scheduled,
-                Pstream::masterNo()
-            );
-
-            toMaster << globalDonorAcceptor;
-        }
-
-        // Scatter recombined list to all processors
-        Pstream::scatter(globalDonorAcceptor);
-
-        // Copy local acceptor list from processor slot
-        acCand = globalDonorAcceptor[Pstream::myProcNo()];
+        // Something went wrong since cachedFringeHolesPtr_ and
+        // cachedAcceptorsPtr_ have to be allocated together
+        FatalErrorIn("void overlapFringe::calcAddressing() const")
+            << "Either fringe holes or acceptors have been cached. "
+            << "Something went wrong."
+            << abort(FatalError);
     }
     else
     {
-        // Serial run
-        forAll (dr, drI)
+        // Get initial guess for holes and acceptors.
+        // Algorithm:
+        //    1) Get holes from overset region and mark immediate neighbours of
+        //       holes as acceptors
+        //    2) Loop through (optionally) user specified patches for
+        //       initialising the overlap fringe assembly, marking face cells
+
+        // Get cut holes from overset region
+        const labelList& cutHoles = region().cutHoles();
+
+        // Debug
+        if (oversetMesh::debug && cutHoles.empty())
         {
-            if (dr[drI] == region().index())
+            Pout<< "Did not find any holes to initialise the overlap fringe "
+                << "assembly. Proceeding to patches..."
+                << endl;
+        }
+
+        // Get necessary mesh data
+        const fvMesh& mesh = region().mesh();
+        const labelListList& cc = mesh.cellCells();
+
+        // Initialise mask field for eligible acceptors (cells that are not
+        // holes)
+        boolList eligibleAcceptors(mesh.nCells(), true);
+
+        forAll (cutHoles, hI)
+        {
+            eligibleAcceptors[cutHoles[hI]] = false;
+        }
+
+        // Dynamic list for storing acceptors.
+        // Note 1: capacity set to number of cells (trading off memory for
+        // efficiency)
+        // Note 2: inserting duplicates is avoided by updating eligibleAcceptors
+        // mask
+        dynamicLabelList candidateAcceptors(mesh.nCells());
+
+        // Loop through cut holes and find acceptor candidates
+        forAll (cutHoles, hI)
+        {
+            // Get neighbours of this hole cell
+            const labelList& hNbrs = cc[cutHoles[hI]];
+
+            // Loop through neighbours of this hole cell
+            forAll (hNbrs, nbrI)
             {
-                FatalErrorIn("void overlapFringe::calcAddressing() const")
-                    << "Region " << region().name()
-                    << " specified as the donor of itself.  "
-                    << "List of donors: " << dr << nl
-                    << "This is not allowed: check oversetMesh definition"
+                // Check whether the neighbouring cell is eligible
+                const label& nbrCellI = hNbrs[nbrI];
+
+                if (eligibleAcceptors[nbrCellI])
+                {
+                    // Append the cell and mask it to avoid duplicate entries
+                    candidateAcceptors.append(nbrCellI);
+                    eligibleAcceptors[nbrCellI] = false;
+                }
+            }
+        }
+
+        // Debug
+        if (oversetMesh::debug() && initPatchNames_.empty())
+        {
+            Pout<< "Did not find any specified patches to initialise the "
+                << " overlap fringe assembly."
+                << endl;
+        }
+
+        // Get reference to region cell zone
+        const cellZone& rcz = region().zone();
+
+        // Loop through patches and mark face cells as eligible acceptors
+        forAll (initPatchNames_, nameI)
+        {
+            const polyPatchID curPatch
+            (
+                initPatchNames_[nameI],
+                mesh.boundaryMesh()
+            );
+
+            if (!curPatch.active())
+            {
+                FatalErrorIn
+                (
+                    "void overlapFringe::calcAddressing() const"
+                )   << "Patch specified for fringe initialisation "
+                    << initPatchNames_[nameI] << " cannot be found"
                     << abort(FatalError);
             }
 
-            // Get reference to current donor region
-            const oversetRegion& curDonorRegion =
-                region().overset().regions()[dr[drI]];
+            const unallocLabelList& curFaceCells =
+                mesh.boundaryMesh()[curPatch.index()].faceCells();
 
-            const labelList& curDonors = curDonorRegion.eligibleDonors();
-
-            // Get donor tree
-            const indexedOctree<treeDataCell>& tree =
-                curDonorRegion.cellSearch();
-
-            // If the tree is empty on local processor, do not search
-            if (tree.nodes().empty())
+            // Loop through face cells and mark candidate acceptors if
+            // eligible
+            forAll (curFaceCells, fcI)
             {
-                continue;
-            }
+                // Get cell index
+                const label& cellI = curFaceCells[fcI];
 
-            scalar span = tree.bb().mag();
-
-            // Go through all candidates find the nearest cell in the current
-            // donor region
-            forAll (acCand, acI)
-            {
-                if (!acCand[acI].donorFound())
+                // Check if the cell is eligible and if it is in region zone
+                // (Note: the second check is costly)
+                if
+                (
+                    eligibleAcceptors[cellI]
+                 && rcz.whichCell(cellI) > -1
+                )
                 {
-                    const label& curCell = acCand[acI].acceptorCell();
-                    const vector& curCentre = cc[curCell];
+                    candidateAcceptors.append(cellI);
+                    eligibleAcceptors[cellI] = false;
+                }
+            }
+        }
 
-                    // Find nearest cell in the current master region
-                    pointIndexHit pih = tree.findNearest(curCentre, span);
+        // Now the tricky part. Because we cannot assume anything about parallel
+        // decomposition, it is possible that a processor face is located
+        // between a hole cell and a non-hole cell, which should then be marked
+        // as an acceptor. The marking of the acceptor cell could then fail
+        // since a neighbourhood search does not go across processor
+        // boundaries.
+        // First, I will create a volScalarField where all the hole cells
+        // are marked with 1, while all the others are marked with -1. Then, I
+        // can use this field to mark the "problematic" acceptors
 
-                    if (pih.hit())
+        // Create the indicator field
+        volScalarField cutHoleIndicator
+        (
+            IOobject
+            (
+                "cutHoleIndicator",
+                mesh.time().timeName(),
+                mesh,
+                IOobject::NO_READ,
+                IOobject::NO_WRITE
+            ),
+            mesh,
+            dimensionedScalar("minusOne", dimless, -1.0)
+        );
+        scalarField& cutHoleIndicatorIn = cutHoleIndicator.internalField();
+
+        // Loop through cut holes and "mark" the holes
+        forAll (cutHoles, hI)
+        {
+            cutHoleIndicatorIn[cutHoles[hI]] = 1.0;
+        }
+
+        // Get boundary field
+        volScalarField::GeometricBoundaryField& cutHoleIndicatorBf =
+            cutHoleIndicator.boundaryField();
+
+        // Evaluate coupled boundaries to perform exchange across processor
+        // boundaries
+        cutHoleIndicatorBf.evaluateCoupled();
+
+        // Loop through boundary field
+        forAll (cutHoleIndicatorBf, patchI)
+        {
+            // Get patch field
+            const fvPatchScalarField& chipf = cutHoleIndicatorBf[patchI];
+
+            // Only perform acceptor search if this is a processor boundary
+            if (isA<processorFvPatchScalarField>(chipf))
+            {
+                // Get neighbour field
+                const scalarField nbrProcHoleIndicator =
+                    chipf.patchNeighbourField();
+
+                // Get face cells
+                const unallocLabelList& fc = chipf.patch().faceCells();
+
+                // Loop through neighbouring processor field
+                forAll (nbrProcHoleIndicator, pfaceI)
+                {
+                    if
+                    (
+                        nbrProcHoleIndicator[pfaceI] > 0.0
+                     && eligibleAcceptors[fc[pfaceI]]
+                    )
                     {
-                        // Note: this check needs to be improved because
-                        // pointInCell is not sufficiently robust.
-                        // HJ, 16/Sep/2015
-                        if
-                        (
-                            mesh.pointInCell(curCentre, curDonors[pih.index()])
-                        )
-                        {
-                            // Found nearest cell in donor region.
-                            // This cell is a potential acceptor
-                            acCand[acI].setDonor
-                            (
-                                curDonors[pih.index()],
-                                Pstream::myProcNo(),
-                                cc[curDonors[pih.index()]]
-                            );
-                        }
+                        // The cell on the other side is a hole, while the cell
+                        // on this side has not been marked yet neither as an
+                        // acceptor or as a hole. Append the cell to candidate
+                        // acceptors and mark it as ineligible anymore
+                        candidateAcceptors.append(fc[pfaceI]);
+                        eligibleAcceptors[fc[pfaceI]] = false;
                     }
                 }
             }
-        } // end for all dr
-    }
-
-    // Collected all overlap donor cells
-
-    // Note: add fringe minimisation here
-    // HJ, 20/Jun/2015
-
-    // Collect acceptors
-    acceptorsPtr_ = new labelList(acCand.size());
-    labelList& acc = *acceptorsPtr_;
-
-    label nAcc = 0;
-
-    forAll (acCand, acI)
-    {
-        // Get current donor acceptor
-        const donorAcceptor& curAcCand = acCand[acI];
-
-        if (donorSuitability_->isDonorSuitable(curAcCand))
-        {
-            acc[nAcc] = curAcCand.acceptorCell();
-            nAcc++;
         }
+
+        // Now we have a decent first guess for acceptors that will be used as
+        // an initial condition for the iterative overlap assembly
+        // process.
+        // Transfer the acceptor list and allocate empty fringeHoles list, which
+        // may be populated in updateIteration member function
+        acceptorsPtr_ = new labelList(candidateAcceptors.xfer());
+        fringeHolesPtr_ = new labelList();
     }
-
-    // Cells near holes must be acceptors. Loop through hole cells and mark
-    // their neighbours as acceptors if they aren't holes
-    const labelListList& cellCells = mesh.cellCells();
-
-    forAll (masterHoles, mhI)
-    {
-        const label& holeCellI = masterHoles[mhI];
-
-        // Loop through neighbouring cells for this hole cell
-        const labelList& nbrCells = cellCells[holeCellI];
-
-        forAll (nbrCells, nbrI)
-        {
-            const label& curNbr = nbrCells[nbrI];
-
-            // If the neighbouring cell is not a hole, it has to be an acceptor
-            if (!holeMask[curNbr])
-            {
-                acc[nAcc] = nbrCells[nbrI];
-                nAcc++;
-
-                // Mark the neighbour as a hole to prevent duplication
-                holeMask[curNbr] = true;
-            }
-        }
-    }
-
-    acc.setSize(nAcc);
-
-    Pout<< "Region " <<  region().name() << " found " << nAcc
-        << " overlap acceptors"
-        << endl;
 }
 
 
@@ -485,6 +275,9 @@ void Foam::overlapFringe::clearAddressing() const
 {
     deleteDemandDrivenData(fringeHolesPtr_);
     deleteDemandDrivenData(acceptorsPtr_);
+    deleteDemandDrivenData(finalDonorAcceptorsPtr_);
+    deleteDemandDrivenData(cachedFringeHolesPtr_);
+    deleteDemandDrivenData(cachedAcceptorsPtr_);
 }
 
 
@@ -501,10 +294,18 @@ Foam::overlapFringe::overlapFringe
     oversetFringe(mesh, region, dict),
     fringeHolesPtr_(NULL),
     acceptorsPtr_(NULL),
+    finalDonorAcceptorsPtr_(NULL),
     donorSuitability_
     (
         donorSuitability::donorSuitability::New(*this, dict)
-    )
+    ),
+    initPatchNames_
+    (
+        dict.lookupOrDefault<wordList>("initPatchNames", wordList())
+    ),
+    cacheFringe_(dict.lookup("cacheFringe")),
+    cachedFringeHolesPtr_(NULL),
+    cachedAcceptorsPtr_(NULL)
 {}
 
 
@@ -518,12 +319,36 @@ Foam::overlapFringe::~overlapFringe()
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
+bool Foam::overlapFringe::updateIteration
+(
+    donorAcceptorList& donorAcceptorRegionData
+) const
+{
+    if (!fringeHolesPtr_ || !acceptorsPtr_)
+    {
+        FatalErrorIn("overlapFringe::updateIteration()")
+            << "fringeHolesPtr_ or acceptorsPtr_ is not allocated. "
+            << "Make sure you have called acceptors() or fringeHoles() to "
+            << "calculate the initial set of donor/acceptors before "
+            << "actually updating iteration."
+            << abort(FatalError);
+    }
+
+
+    // Create new batch of acceptors and holes for next iteration
+
+    // Set the flag to true or false whether a suitable overlap has been found
+
+    return foundSuitableOverlap();
+}
+
+
+
 const Foam::labelList& Foam::overlapFringe::fringeHoles() const
 {
     if (!fringeHolesPtr_)
     {
-        // fringeHoles currently empty.  HJ, 10/Sep/2015
-        fringeHolesPtr_ = new labelList();
+        calcAddressing();
     }
 
     return *fringeHolesPtr_;
@@ -541,10 +366,38 @@ const Foam::labelList& Foam::overlapFringe::acceptors() const
 }
 
 
+Foam::donorAcceptorList& Foam::overlapFringe::finalDonorAcceptors() const
+{
+    if (!finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("overlapFringe::finalDonorAcceptors()")
+            << "finalDonorAcceptorPtr_ not allocated. Make sure you have "
+            << "called overlapFringe::updateIteration() before asking for "
+            << "final set of donor/acceptor pairs."
+            << abort(FatalError);
+    }
+
+    if (!foundSuitableOverlap())
+    {
+        FatalErrorIn("overlapFringe::finalDonorAcceptors()")
+            << "Attemted to access finalDonorAcceptors but suitable overlap "
+            << "has not been found. This is not allowed. "
+            << abort(FatalError);
+    }
+
+    return *finalDonorAcceptorsPtr_;
+}
+
+
 void Foam::overlapFringe::update() const
 {
     Info<< "overlapFringe::update() const" << endl;
+
+    // Clear out
     clearAddressing();
+
+    // Set flag to false
+    updateSuitableOverlapFlag(false);
 }
 
 
