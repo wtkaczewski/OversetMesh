@@ -165,13 +165,13 @@ bool Foam::compositeFringe::updateIteration
 {
     // If the donorAcceptor list has been allocated, something went wrong with
     // the iteration procedure (not-updated flag): this function has been called
-    // more than once, which should not happen for manualFringe
+    // more than once, which should not happen for compositeFringe
     if (finalDonorAcceptorsPtr_)
     {
-        FatalErrorIn("manualFringe::updateIteration(donorAcceptorList&")
+        FatalErrorIn("compositeFringe::updateIteration(donorAcceptorList&")
             << "finalDonorAcceptorPtr_ already allocated. Something went "
             << "wrong with the iteration procedure (flag was not updated)."
-            << nl << "This should not happen for manualFringe."
+            << nl << "This should not happen for compositeFringe."
             << abort(FatalError);
     }
 

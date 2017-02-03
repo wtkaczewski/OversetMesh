@@ -160,7 +160,10 @@ class oversetRegion
         //  donor regions to the acceptor cell
         mutable donorAcceptorList* donorCellsPtr_;
 
-        //- Hole cell labels
+        //- Cut hole cell labels
+        mutable labelList* cutHoleCellsPtr_;
+
+        //- Complete hole cell labels (cut + fringe holes)
         mutable labelList* holeCellsPtr_;
 
         //- Eligible donor cells from current region
@@ -226,7 +229,10 @@ class oversetRegion
         //- Calculate donor and acceptor cells
         void calcDonorAcceptorCells() const;
 
-        //- Calculate hole cells
+        //- Calculate cut hole cells
+        void calcCutHoleCells() const;
+
+        //- Calculate complete hole cells (cut + fringe)
         void calcHoleCells() const;
 
         //- Calculate eligible donor cells
@@ -334,7 +340,10 @@ public:
             //- Return donor cell list
             const donorAcceptorList& donors() const;
 
-            //- Return hole cell list
+            //- Return cut holes only
+            const labelList& cutHoles() const;
+
+            //- Return complete hole cell list (cut + fringe holes)
             const labelList& holes() const;
 
             //- Return eligible donor cell list

@@ -208,12 +208,12 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
 }
 
 
-void Foam::oversetRegion::calcHoleCells() const
+void Foam::oversetRegion::calcCutHoleCells() const
 {
-    if (holeCellsPtr_)
+    if (cutHoleCellsPtr_)
     {
-        FatalErrorIn("void oversetRegion::calcHoleCells() const")
-            << "Hole cells already calculated"
+        FatalErrorIn("void oversetRegion::calcCutHoleCells() const")
+            << "Cut hole cells already calculated"
             << abort(FatalError);
     }
 
@@ -238,15 +238,6 @@ void Foam::oversetRegion::calcHoleCells() const
 
     // Prepare hole mask
     boolList holeMask(mesh().nCells(), false);
-
-    // Mark all cells indicated by fringe
-    // Mask additional hole cells as defined by the fringe
-    const labelList& fringeHoles = fringePtr_().fringeHoles();
-
-    forAll (fringeHoles, i)
-    {
-        holeMask[fringeHoles[i]] = true;
-    }
 
     // Mark all hole cells using their hole boundary patch inside search
 
@@ -295,8 +286,8 @@ void Foam::oversetRegion::calcHoleCells() const
     }
 
     // Allocate hole cells storage
-    holeCellsPtr_ = new labelList(nHoleCells);
-    labelList& ch = *holeCellsPtr_;
+    cutHoleCellsPtr_ = new labelList(nHoleCells);
+    labelList& ch = *cutHoleCellsPtr_;
 
     // Reset counter and collect hole cells
     nHoleCells = 0;
@@ -310,9 +301,73 @@ void Foam::oversetRegion::calcHoleCells() const
         }
     }
 
-//     Pout<< "Region " << name()
-//         << " number of local holes = " << holeCellsPtr_->size()
-//         << endl;
+    if (oversetMesh::debug)
+    {
+        Pout<< "Region " << name()
+            << " number of local holes = " << holeCellsPtr_->size()
+            << endl;
+    }
+}
+
+
+void Foam::oversetRegion::calcHoleCells() const
+{
+    if (holeCellsPtr_)
+    {
+        FatalErrorIn("void oversetRegion::calcHoleCells() const")
+            << "Hole cells already calculated"
+            << abort(FatalError);
+    }
+
+    // Combine cut hole cells and fringe cells into a single list
+
+    // Prepare hole mask
+    boolList holeMask(mesh().nCells(), false);
+
+    // Mask all cut hole cells
+    const labelList& cutHoleCells = cutHoles();
+
+    forAll (cutHoleCells, i)
+    {
+        holeMask[cutHoleCells[i]] = true;
+    }
+
+    // Mask fringe hole cells
+    const labelList& fringeHoleCells = fringePtr_->fringeHoles();
+
+    forAll (fringeHoleCells, i)
+    {
+        holeMask[fringeHoleCells[i]] = true;
+    }
+
+    // Count hole cells in the region
+    const labelList& rc = regionCells();
+
+    label nHoleCells = 0;
+
+    forAll (rc, i)
+    {
+        if (holeMask[rc[i]])
+        {
+            ++nHoleCells;
+        }
+    }
+
+    // Allocate hole cells storage
+    holeCellsPtr_ = new labelList(nHoleCells);
+    labelList& h = *holeCellsPtr_;
+
+    // Reset counter and collect hole cells
+    nHoleCells = 0;
+
+    forAll (rc, i)
+    {
+        if (holeMask[rc[i]])
+        {
+            h[nHoleCells] = rc[i];
+            ++nHoleCells;
+        }
+    }
 }
 
 
@@ -732,6 +787,7 @@ void Foam::oversetRegion::clearOut() const
 
     deleteDemandDrivenData(acceptorCellsPtr_);
     deleteDemandDrivenData(donorCellsPtr_);
+    deleteDemandDrivenData(cutHoleCellsPtr_);
     deleteDemandDrivenData(holeCellsPtr_);
     deleteDemandDrivenData(eligibleDonorCellsPtr_);
 
@@ -1509,6 +1565,7 @@ Foam::oversetRegion::oversetRegion
 
     acceptorCellsPtr_(NULL),
     donorCellsPtr_(NULL),
+    cutHoleCellsPtr_(NULL),
     holeCellsPtr_(NULL),
     eligibleDonorCellsPtr_(NULL),
 
@@ -1599,6 +1656,17 @@ const Foam::donorAcceptorList& Foam::oversetRegion::donors() const
     }
 
     return *donorCellsPtr_;
+}
+
+
+const Foam::labelList& Foam::oversetRegion::cutHoles() const
+{
+    if (!cutHoleCellsPtr_)
+    {
+        calcCutHoleCells();
+    }
+
+    return *cutHoleCellsPtr_;
 }
 
 

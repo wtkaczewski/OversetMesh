@@ -130,8 +130,8 @@ public:
         //- Return list of acceptor cells
         virtual const labelList& acceptors() const;
 
-        //- Return list of final donor acceptor pairs. Note: may invalidate
-        //  finalDonorAcceptorsPtr_ for optimisation purposes
+        //- Return list of final donor acceptor pairs. Note: caller may
+        //  invalidate finalDonorAcceptorsPtr_ for optimisation purposes
         virtual donorAcceptorList& finalDonorAcceptors() const;
 
         //- Update the fringe
