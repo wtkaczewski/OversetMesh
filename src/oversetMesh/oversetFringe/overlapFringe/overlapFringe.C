@@ -295,6 +295,7 @@ Foam::overlapFringe::overlapFringe
     fringeHolesPtr_(NULL),
     acceptorsPtr_(NULL),
     finalDonorAcceptorsPtr_(NULL),
+
     donorSuitability_
     (
         donorSuitability::donorSuitability::New(*this, dict)
@@ -303,6 +304,15 @@ Foam::overlapFringe::overlapFringe
     (
         dict.lookupOrDefault<wordList>("initPatchNames", wordList())
     ),
+    nTotalConsideredPairs_(0),
+    nTotalSuitablePairs_(0),
+    minGlobalFraction_
+    (
+        readScalar(dict.lookup("suitablePairFraction"))
+    ),
+    // Allocate enough storage to prevent excessive resizing
+    cumulativeDonorAcceptors(mesh.nCells()),
+
     cacheFringe_(dict.lookup("cacheFringe")),
     cachedFringeHolesPtr_(NULL),
     cachedAcceptorsPtr_(NULL)
@@ -334,9 +344,53 @@ bool Foam::overlapFringe::updateIteration
             << abort(FatalError);
     }
 
+    // Create an indicator field which will keep track of suitable pairs
+    boolList isSuitable(donorAcceptorRegionData.size(), false);
+
+    // Count suitable pairs
+    label nSuitablePairs = 0;
+
+    // Loop through donor/acceptor pairs and perform mark-up
+    forAll (donorAcceptorRegionData, daPairI)
+    {
+        if (donorSuitability_->isDonorSuitable(donorAcceptorRegionData[daPair]))
+        {
+            // Donor is suitable, mark it and increment the counter
+            isSuitable[daPairI] = true;
+            ++nSuitablePairs;
+        }
+    }
+
+    // Update number of total considered and suitable pairs
+    nTotalConsideredPairs_ += returnReduce<label>
+    (
+        donorAcceptorReginData.size(),
+        sumOp<label>()
+    );
+    nTotalSuitablePairs_ += returnReduce<label>(nSuitablePairs, sumOp<label>());
+
+    // Check whether the criterion has been satisfied
+    if
+    (
+        scalar(nTotalSuitablePairs_)/scalar(nTotalConsideredPairs_)
+      > minGlobalFraction_)
+    {
+        // We have found at least 100*minGlobalFraction_ percent of suitable
+        // donor/acceptor pairs.
+
+        // Append current list to the cumulative list
+        cumulativeDonorAcceptors_.append(donorAcceptorRegionData);
+
+        // Transfer ownership of the current list to the
+        // finalDonorAcceptorsPtr_
+    }
+
+
 
     // Create new batch of acceptors and holes for next iteration
 
+    // Don't forget to reset all the counters
+    
     // Set the flag to true or false whether a suitable overlap has been found
 
     return foundSuitableOverlap();

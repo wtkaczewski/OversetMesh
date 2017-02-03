@@ -68,13 +68,30 @@ class overlapFringe
         //- Final donor/acceptor pairs for this region (fringe)
         mutable donorAcceptorList* finalDonorAcceptorsPtr_;
 
-        //- Run-time selectable donor/acceptor suitability handler
-        autoPtr<donorSuitability::donorSuitability> donorSuitability_;
 
-        //- List of patches to start the iterative fringe assembly process
-        //  (empty list by default)
-        wordList initPatchNames_;
+        // Data for iteration control
+    
+            //- Run-time selectable donor/acceptor suitability handler
+            autoPtr<donorSuitability::donorSuitability> donorSuitability_;
+    
+            //- List of patches to start the iterative fringe assembly process
+            //  (empty list by default)
+            const wordList initPatchNames_;
 
+            //- Number of total considered pairs
+            label nTotalConsideredPairs_;
+    
+            //- Number of found suitable donor/acceptor pairs (helper)
+            label nTotalSuitablePairs_;
+    
+            //- Minimum global fraction of suitable donors. Iteration process
+            //  stops if the calculated fraction is greater than the minimum
+            //  allowable fraction
+            const scalar minGlobalFraction_;
+
+            //- Worker dynamic list of donor/acceptor pairs for efficiency
+            donorAcceptorDynamicList cumulativeDonorAcceptors_;
+    
 
         // Data for cache control in order to make overlap fringe more efficient
         // for moving mesh cases (restart acceptors/fringe holes with the ones

@@ -42,7 +42,7 @@ namespace Foam
     typedef List<donorAcceptor> donorAcceptorList;
     typedef List<donorAcceptorList> donorAcceptorListList;
 
-    typedef List<donorAcceptor> donorAcceptorDynamicList;
+    typedef DynamicList<donorAcceptor> donorAcceptorDynamicList;
 }
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
