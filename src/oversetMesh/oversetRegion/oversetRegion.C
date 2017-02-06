@@ -318,7 +318,7 @@ void Foam::oversetRegion::calcCutHoleCells() const
     if (oversetMesh::debug)
     {
         Pout<< "Region " << name()
-            << " number of local holes = " << holeCellsPtr_->size()
+            << " number of local holes = " << cutHoleCellsPtr_->size()
             << endl;
     }
 }
@@ -1436,6 +1436,27 @@ void Foam::oversetRegion::finaliseDonorAcceptors() const
         true // reuse
     );
     const donorAcceptorList& acceptorCells = *acceptorCellsPtr_;
+
+    // Note: the only way it is possible that the donor has not been found is if
+    // the original acceptor cell is not within bounding boxes of all processor
+    // containing donor regions. This means that the mesh set-up is considered
+    // invalid, although this will not fail on serial runs because we do not
+    // require that the acceptor cell is within the donor cell. VV, 6/Feb/2017.
+    forAll (acceptorCells, accI)
+    {
+        if (!acceptorCells[accI].donorFound())
+        {
+            FatalErrorIn("void oversetRegion::finaliseDonorAcceptors() const")
+                << "Did not find a donor for acceptor at: "
+                << acceptorCells[accI].acceptorPoint()
+                << nl
+                << "This means that all donor regions do not contain acceptor "
+                << "point, implying invalid overset mesh."
+                << nl
+                << "Please check your overset mesh structure."
+                << abort(FatalError);
+        }
+    }
 
     // STAGE 2: Calculate the sending map
 
