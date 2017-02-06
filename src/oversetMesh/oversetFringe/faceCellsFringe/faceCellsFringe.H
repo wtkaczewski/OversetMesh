@@ -128,7 +128,7 @@ public:
         virtual const labelList& fringeHoles() const;
 
         //- Return list of acceptor cells
-        virtual const labelList& acceptors() const;
+        virtual const labelList& candidateAcceptors() const;
 
         //- Return list of final donor acceptor pairs. Note: caller may
         //  invalidate finalDonorAcceptorsPtr_ for optimisation purposes

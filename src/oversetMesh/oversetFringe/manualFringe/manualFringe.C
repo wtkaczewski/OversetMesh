@@ -195,7 +195,7 @@ const Foam::labelList& Foam::manualFringe::fringeHoles() const
 }
 
 
-const Foam::labelList& Foam::manualFringe::acceptors() const
+const Foam::labelList& Foam::manualFringe::candidateAcceptors() const
 {
     if (!acceptorsPtr_)
     {

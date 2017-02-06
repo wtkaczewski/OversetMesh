@@ -414,7 +414,7 @@ void Foam::oversetRegion::calcEligibleDonorCells() const
     }
 
     // Remove all acceptor cells from fringe
-    const labelList& ac = fringePtr_().acceptors();
+    const labelList& ac = fringePtr_->candidateAcceptors();
 
     forAll (ac, acI)
     {
@@ -897,7 +897,7 @@ bool Foam::oversetRegion::updateDonorAcceptors() const
     // STAGE 1: Start iteration for this region
 
     // Get current and local acceptor cells from oversetFringe
-    const labelList& a = fringePtr_->acceptors();
+    const labelList& a = fringePtr_->candidateAcceptors();
 
     // Create a list of local acceptors (holding acceptors on this processor and
     // donors on possibly remote processor)

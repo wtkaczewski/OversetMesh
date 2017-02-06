@@ -181,7 +181,7 @@ const Foam::labelList& Foam::faceCellsFringe::fringeHoles() const
 }
 
 
-const Foam::labelList& Foam::faceCellsFringe::acceptors() const
+const Foam::labelList& Foam::faceCellsFringe::candidateAcceptors() const
 {
     if (!acceptorsPtr_)
     {

@@ -99,7 +99,7 @@ void Foam::compositeFringe::calcAddressing() const
             }
         }
 
-        const labelList& ca = baseFringes_[bfI].acceptors();
+        const labelList& ca = baseFringes_[bfI].candidateAcceptors();
 
         forAll (ca, caI)
         {
@@ -200,7 +200,7 @@ const Foam::labelList& Foam::compositeFringe::fringeHoles() const
 }
 
 
-const Foam::labelList& Foam::compositeFringe::acceptors() const
+const Foam::labelList& Foam::compositeFringe::candidateAcceptors() const
 {
     if (!acceptorsPtr_)
     {

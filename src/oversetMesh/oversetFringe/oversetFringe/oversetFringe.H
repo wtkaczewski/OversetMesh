@@ -193,8 +193,8 @@ public:
             //  cells, which fall outside of all donor regions
             virtual const labelList& fringeHoles() const = 0;
 
-            //- Return list of acceptor cells
-            virtual const labelList& acceptors() const = 0;
+            //- Return list of candidate acceptor cells
+            virtual const labelList& candidateAcceptors() const = 0;
 
             //- Return reference to final donor acceptor pairs
             virtual donorAcceptorList& finalDonorAcceptors() const = 0;

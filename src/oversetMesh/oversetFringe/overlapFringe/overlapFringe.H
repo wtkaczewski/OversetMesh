@@ -28,6 +28,31 @@ Class
 Description
     Overlap fringe algorithm
 
+    Holds and manages following data:
+
+      - fringeHolesPtr_: holds fringe holes which are basically discarded
+        acceptors from previous iterations
+      - acceptorsPtr_: holds current set of acceptors to consider
+      - finalDonorAcceptorsPtr_: final set of donor/acceptors which will be used
+        for the overset interpolation
+      - donorSuitability_: run-time selectable Donor Suitability Function
+      - initPatchNames_: optional list of patches that we use to start the
+        acceptor search from
+      - minGlobalFraction_: minimum allowable global fraction of suitable pairs
+      - cumulativeDonorAcceptorsPtr_: list of suitable donor/acceptor pairs
+      - cacheFringe_: switch to control whether to cache the fringe for next
+        mesh updates (start from latest suitable set of acceptors, rather than
+        from the beginning)
+      - fringeIter_: iteration counter
+
+    Member function updateIteration controls the iterative process:
+      - Checks whether given donor/acceptors are suitable and filters them,
+      - If the user-specified criterion controlled by minGlobalFraction_ is not
+        reached (i.e. suitable overlap has not been found), then we loop through
+        unsuitable acceptors and mark their neighbours (excluding existing
+        acceptors and holes) as candidate acceptors for the next iteration,
+      - Unsuitable acceptors become fringe holes.
+
 Author
     Vuko Vukcevic, Wikki Ltd.  All rights reserved.
     Hrvoje Jasak, Wikki Ltd.  All rights reserved.
@@ -145,7 +170,7 @@ public:
         virtual const labelList& fringeHoles() const;
 
         //- Return list of acceptor cells
-        virtual const labelList& acceptors() const;
+        virtual const labelList& candidateAcceptors() const;
 
         //- Return list of final donor acceptor pairs. Note: caller may
         //  invalidate finalDonorAcceptorsPtr_ for optimisation purposes

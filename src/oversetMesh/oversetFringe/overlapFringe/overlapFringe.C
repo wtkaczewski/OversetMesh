@@ -493,7 +493,7 @@ const Foam::labelList& Foam::overlapFringe::fringeHoles() const
 }
 
 
-const Foam::labelList& Foam::overlapFringe::acceptors() const
+const Foam::labelList& Foam::overlapFringe::candidateAcceptors() const
 {
     if (!acceptorsPtr_)
     {
