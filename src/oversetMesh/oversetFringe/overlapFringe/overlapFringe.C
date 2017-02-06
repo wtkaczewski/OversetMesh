@@ -281,15 +281,13 @@ Foam::overlapFringe::overlapFringe
     (
         dict.lookupOrDefault<wordList>("initPatchNames", wordList())
     ),
-    nTotalConsideredPairs_(0),
-    nTotalSuitablePairs_(0),
     minGlobalFraction_
     (
         readScalar(dict.lookup("suitablePairFraction"))
     ),
     cumulativeDonorAcceptorsPtr_(NULL),
-
-    cacheFringe_(dict.lookup("cacheFringe"))
+    cacheFringe_(dict.lookup("cacheFringe")),
+    fringeIter_(0)
 {}
 
 
@@ -327,6 +325,9 @@ bool Foam::overlapFringe::updateIteration
             << abort(FatalError);
     }
 
+    // Increment iteration counter for output
+    ++fringeIter_;
+
     // Allocate worker cumulative donor/acceptor list if it has not been
     // allocated yet (first iteration). Use largest possible size to prevent
     // any resizing
@@ -337,12 +338,10 @@ bool Foam::overlapFringe::updateIteration
             region().mesh().nCells()
         );
     }
+    donorAcceptorDynamicList& cumDAPairs = *cumulativeDonorAcceptorsPtr_;
 
-    // Create an indicator field which will keep track of suitable pairs
-    boolList isSuitable(donorAcceptorRegionData.size(), false);
-
-    // Count suitable pairs
-    label nSuitablePairs = 0;
+    // Create a list containing unsuitable donors
+    donorAcceptorDynamicList unsuitableDAPairs(donorAcceptorRegionData.size());
 
     // Loop through donor/acceptor pairs and perform mark-up
     forAll (donorAcceptorRegionData, daPairI)
@@ -352,45 +351,131 @@ bool Foam::overlapFringe::updateIteration
             donorSuitability_->isDonorSuitable(donorAcceptorRegionData[daPairI])
         )
         {
-            // Donor is suitable, mark it and increment the counter
-            isSuitable[daPairI] = true;
-            ++nSuitablePairs;
+            // Donor is suitable, add it directly to the cumulative list
+            cumDAPairs.append(donorAcceptorRegionData[daPairI]);
+        }
+        else
+        {
+            // Donor is not suitable, append it to the unsuitable list
+            unsuitableDAPairs.append(donorAcceptorRegionData[daPairI]);
         }
     }
 
-    // Update number of total considered and suitable pairs
-    nTotalConsideredPairs_ += returnReduce<label>
-    (
-        donorAcceptorRegionData.size(),
-        sumOp<label>()
-    );
-    nTotalSuitablePairs_ += returnReduce<label>(nSuitablePairs, sumOp<label>());
+    // Calculate the number of total suitable pairs found so far and the number
+    // of total pairs
+    const label nSuitablePairs =
+        returnReduce<label>(cumDAPairs.size(), sumOp<label>());
+
+    const label nTotalPairs = nSuitablePairs
+      + returnReduce<label>(unsuitableDAPairs.size(), sumOp<label>());
+
+    const scalar suitabilityFrac = scalar(nSuitablePairs)/scalar(nTotalPairs);
+
+    // Print information
+    Info<< "Overlap fringe iteration: " << fringeIter_
+        << " for region: " << region().name()
+        << nl
+        << "Cumulative suitable pairs: " << nSuitablePairs
+        << ", total number of pairs: " << nTotalPairs
+        << " (" << suitabilityFrac << ")%"
+        << endl;
 
     // Check whether the criterion has been satisfied
-    if
-    (
-        scalar(nTotalSuitablePairs_)/scalar(nTotalConsideredPairs_)
-      > minGlobalFraction_
-    )
+    if (suitabilityFrac > minGlobalFraction_)
     {
-        // We have found at least 100*minGlobalFraction_ percent of suitable
-        // donor/acceptor pairs.
+        // At least 100*minGlobalFraction_ percent of suitable donor/acceptor
+        // pairs have been found.
+        Info<< "Finished assembling overlap fringe. " << endl;
 
-        // Append current list to the cumulative list
-        cumulativeDonorAcceptorsPtr_->append(donorAcceptorRegionData);
+        // Append unsuitable donors to the list as well
+        cumDAPairs.append(unsuitableDAPairs);
 
         // Transfer ownership of the current cumulative list to the
         // finalDonorAcceptorsPtr_
+        finalDonorAcceptorsPtr_ = new donorAcceptorList
+        (
+            cumulativeDonorAcceptorsPtr_->xfer()
+        );
 
+        // Set the flag to true
+        updateSuitableOverlapFlag(true);
     }
+    else
+    {
+        // A sufficient number of suitable donor/acceptors has not been
+        // found. Go through unsuitable donor/acceptor pairs and find a new
+        // batch of acceptors and holes for the next iteration
 
+        // Get necessary mesh data
+        const fvMesh& mesh = region().mesh();
+        const labelListList& cc = mesh.cellCells();
 
+        // Transfer fringeHolesPtr into the dynamic list for efficiency. Note:
+        // will be transfered back at the end of the scope.
+        dynamicLabelList cumFringeHoles(fringeHolesPtr_->xfer());
 
-    // Create new batch of acceptors and holes for next iteration
+        // Create mask to prevent wrong and duplicate entries (i.e. we cannot
+        // search backwards through existing acceptors and holes)
+        boolList freeCells(mesh.nCells(), true);
 
-    // Don't forget to reset all the counters
+        // Mask all considered suitable acceptor cells so far
+        forAll (cumDAPairs, cpI)
+        {
+            freeCells[cumDAPairs[cpI].acceptorCell()] = false;
+        }
 
-    // Set the flag to true or false whether a suitable overlap has been found
+        // Mask all current unsuitable acceptor pairs as well
+        forAll (unsuitableDAPairs, upI)
+        {
+            freeCells[unsuitableDAPairs[upI].acceptorCell()] = false;
+        }
+
+        // Mask all fringe holes
+        forAll (cumFringeHoles, cfhI)
+        {
+            freeCells[cumFringeHoles[cfhI]] = false;
+        }
+
+        // Create dynamic list to efficiently append new batch of
+        // acceptors. Note: allocate enough storage.
+        dynamicLabelList newAcceptors(10*unsuitableDAPairs.size());
+
+        // Loop through unsuitable acceptors
+        forAll (unsuitableDAPairs, upI)
+        {
+            // Get acceptor cell and its neighbours
+            const label& accI = unsuitableDAPairs[upI].acceptorCell();
+            const labelList& aNbrs = cc[accI];
+
+            // Loop through neighbours of this acceptor cell
+            forAll (aNbrs, nbrI)
+            {
+                // Check whether the neighbouring cell is free
+                const label& nbrCellI = aNbrs[nbrI];
+
+                if (freeCells[nbrCellI])
+                {
+                    // This cell is neither an old acceptor, fringe hole nor it
+                    // has been considered previously. Append it to the
+                    // newAcceptors list and mark it as visited
+                    newAcceptors.append(nbrCellI);
+                    freeCells[nbrCellI] = false;
+                }
+            }
+
+            // Append this "old" acceptor cell into fringe holes list
+            cumFringeHoles.append(accI);
+        }
+
+        // Transfer back cumulative fringe holes into the fringeHolesPtr_
+        fringeHolesPtr_->transfer(cumFringeHoles);
+
+        // Transfer new acceptors into the acceptors list
+        acceptorsPtr_->transfer(newAcceptors);
+
+        // Set the flag to false (suitable overlap not found)
+        updateSuitableOverlapFlag(false);
+    }
 
     return foundSuitableOverlap();
 }
@@ -468,7 +553,7 @@ void Foam::overlapFringe::update() const
         deleteDemandDrivenData(acceptorsPtr_);
 
         // Now allocate with the correct size. Note: since it is expected that
-        // acceptorsPtr_->size() will definitely be smaller than
+        // acceptorsPtr_->size() (before destruction) is smaller than
         // finalDonorAcceptorsPtr_.size(), this destruction and initialization
         // should not represent an overhead.
         acceptorsPtr_ = new labelList(finalDAPairs.size());
@@ -492,6 +577,9 @@ void Foam::overlapFringe::update() const
         // Clear everything, including acceptors and fringe holes
         clearAddressing();
     }
+
+    // Reset iteration counter
+    fringeIter_ = 0;
 
     // Set flag to false
     updateSuitableOverlapFlag(false);

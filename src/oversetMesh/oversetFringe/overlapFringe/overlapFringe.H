@@ -78,12 +78,6 @@ class overlapFringe
             //  (empty list by default)
             const wordList initPatchNames_;
 
-            //- Number of total considered pairs
-            mutable label nTotalConsideredPairs_;
-
-            //- Number of found suitable donor/acceptor pairs (helper)
-            mutable label nTotalSuitablePairs_;
-
             //- Minimum global fraction of suitable donors. Iteration process
             //  stops if the calculated fraction is greater than the minimum
             //  allowable fraction
@@ -94,6 +88,9 @@ class overlapFringe
 
             //- Switch to control cacheing
             Switch cacheFringe_;
+
+            //- Iteration counter
+            mutable label fringeIter_;
 
 
     // Private Member Functions
