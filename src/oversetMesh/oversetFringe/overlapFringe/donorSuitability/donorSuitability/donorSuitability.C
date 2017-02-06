@@ -117,23 +117,4 @@ Foam::donorSuitability::donorSuitability::coeffDict() const
 }
 
 
-void Foam::donorSuitability::donorSuitability::rejectUnsuitableDonors
-(
-    donorAcceptorList& acceptorCandidates
-) const
-{
-    forAll (acceptorCandidates, acI)
-    {
-        // Get current donor acceptor
-        donorAcceptor& curAcCand = acceptorCandidates[acI];
-
-        // If the donor is found and if it isn't suitable, reject it
-        if (!isDonorSuitable(curAcCand))
-        {
-            curAcCand.rejectDonor();
-        }
-    }
-}
-
-
 // ************************************************************************* //
