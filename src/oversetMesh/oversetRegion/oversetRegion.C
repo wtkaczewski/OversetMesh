@@ -175,13 +175,13 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
     // Get all overset regions
     const PtrList<oversetRegion>& regions = oversetMesh_.regions();
 
-    // Flag indicating that a suitable overlap has been found
-    bool foundOverlap;
+    // Flag indicating that a suitable overlap has been found for all regions
+    bool foundGlobalOverlap;
 
     do
     {
         // Set flag to true
-        foundOverlap = true;
+        foundGlobalOverlap = true;
 
         // Loop through all regions
         forAll (regions, orI)
@@ -192,9 +192,23 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
             // Update donor/acceptors for this region.
             // Note: updateDonorAcceptors() returns a bool indicating whether
             // a suitable overlap is found for this particular region
-            foundOverlap &= curRegion.updateDonorAcceptors();
+            const bool regionFoundSuitableOverlap =
+                curRegion.updateDonorAcceptors();
+
+            // Update global flag
+            foundGlobalOverlap &= regionFoundSuitableOverlap;
+
+            // If the overlap has not been found for this region, we need to
+            // reset:
+            //  - eligibleDonors (depend on fringe holes and acceptors),
+            //  - cellSearch (depends on eligible donors).
+            if (!regionFoundSuitableOverlap)
+            {
+                deleteDemandDrivenData(eligibleDonorCellsPtr_);
+                deleteDemandDrivenData(cellSearchPtr_);
+            }
         }
-    } while (!foundOverlap);
+    } while (!foundGlobalOverlap);
 
     // Since a suitable overlap has been found for all regions, set-up
     // donor/acceptor fields for all regions
