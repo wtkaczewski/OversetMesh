@@ -52,10 +52,38 @@ void Foam::overlapFringe::calcAddressing() const
 
     // Get initial guess for holes and acceptors.
     // Algorithm:
-    //    1) Get holes from overset region and mark immediate neighbours of
-    //       holes as acceptors
-    //    2) Loop through (optionally) user specified patches for
-    //       initialising the overlap fringe assembly, marking face cells
+    //    - Create indicator field for correct data exchange accross processor
+    //      boundaries
+    //    - Get holes from overset region and mark immediate neighbours of
+    //      holes as acceptors
+    //    - Loop through (optionally) user specified patches for
+    //      initialising the overlap fringe assembly, marking face cells
+
+    // Get necessary mesh data
+    const fvMesh& mesh = region().mesh();
+    const labelListList& cc = mesh.cellCells();
+
+    // Note: Because we cannot assume anything about parallel decomposition and
+    // we use neighbourhood walk algorithm, there is no easy way to go across
+    // processor boundaries. We will create an indicator field marking all
+    // possible cut cells and all possible face cells of given patches. Then, we
+    // will use this indicator field to transfer the search to the other side.
+
+    // Create the indicator field
+    volScalarField processorIndicator
+    (
+        IOobject
+        (
+            "processorIndicator",
+            mesh.time().timeName(),
+            mesh,
+            IOobject::NO_READ,
+            IOobject::NO_WRITE
+        ),
+        mesh,
+        dimensionedScalar("minusOne", dimless, -1.0)
+    );
+    scalarField& processorIndicatorIn = processorIndicator.internalField();
 
     // Get cut holes from overset region
     const labelList& cutHoles = region().cutHoles();
@@ -68,17 +96,19 @@ void Foam::overlapFringe::calcAddressing() const
             << endl;
     }
 
-    // Get necessary mesh data
-    const fvMesh& mesh = region().mesh();
-    const labelListList& cc = mesh.cellCells();
-
     // Initialise mask field for eligible acceptors (cells that are not
     // holes)
     boolList eligibleAcceptors(mesh.nCells(), true);
 
     forAll (cutHoles, hI)
     {
-        eligibleAcceptors[cutHoles[hI]] = false;
+        const label& holeCellI = cutHoles[hI];
+
+        // Mask eligible acceptors
+        eligibleAcceptors[holeCellI] = false;
+
+        // Mark cut hole cell in processor indicator field
+        processorIndicatorIn[holeCellI] = 1.0;
     }
 
     // Dynamic list for storing acceptors.
@@ -149,6 +179,9 @@ void Foam::overlapFringe::calcAddressing() const
             // Get cell index
             const label& cellI = curFaceCells[fcI];
 
+            // Mark acceptor face cell in processor indicator field
+            processorIndicatorIn[cellI] = 1.0;
+
             // Check if the cell is eligible and if it is in region zone
             // (Note: the second check is costly)
             if
@@ -163,75 +196,44 @@ void Foam::overlapFringe::calcAddressing() const
         }
     }
 
-    // Now the tricky part. Because we cannot assume anything about parallel
-    // decomposition, it is possible that a processor face is located
-    // between a hole cell and a non-hole cell, which should then be marked
-    // as an acceptor. The marking of the acceptor cell could then fail
-    // since a neighbourhood search does not go across processor
-    // boundaries.
-    // First, I will create a volScalarField where all the hole cells
-    // are marked with 1, while all the others are marked with -1. Then, I
-    // can use this field to mark the "problematic" acceptors
-
-    // Create the indicator field
-    volScalarField cutHoleIndicator
-    (
-        IOobject
-        (
-            "cutHoleIndicator",
-            mesh.time().timeName(),
-            mesh,
-            IOobject::NO_READ,
-            IOobject::NO_WRITE
-        ),
-        mesh,
-        dimensionedScalar("minusOne", dimless, -1.0)
-    );
-    scalarField& cutHoleIndicatorIn = cutHoleIndicator.internalField();
-
-    // Loop through cut holes and "mark" the holes
-    forAll (cutHoles, hI)
-    {
-        cutHoleIndicatorIn[cutHoles[hI]] = 1.0;
-    }
-
     // Get boundary field
-    volScalarField::GeometricBoundaryField& cutHoleIndicatorBf =
-        cutHoleIndicator.boundaryField();
+    volScalarField::GeometricBoundaryField& processorIndicatorBf =
+        processorIndicator.boundaryField();
 
     // Evaluate coupled boundaries to perform exchange across processor
     // boundaries
-    cutHoleIndicatorBf.evaluateCoupled();
+    processorIndicatorBf.evaluateCoupled();
 
     // Loop through boundary field
-    forAll (cutHoleIndicatorBf, patchI)
+    forAll (processorIndicatorBf, patchI)
     {
         // Get patch field
-        const fvPatchScalarField& chipf = cutHoleIndicatorBf[patchI];
+        const fvPatchScalarField& chipf = processorIndicatorBf[patchI];
 
         // Only perform acceptor search if this is a processor boundary
         if (isA<processorFvPatchScalarField>(chipf))
         {
             // Get neighbour field
-            const scalarField nbrProcHoleIndicator =
+            const scalarField nbrProcIndicator =
                 chipf.patchNeighbourField();
 
             // Get face cells
             const unallocLabelList& fc = chipf.patch().faceCells();
 
             // Loop through neighbouring processor field
-            forAll (nbrProcHoleIndicator, pfaceI)
+            forAll (nbrProcIndicator, pfaceI)
             {
                 if
                 (
-                    nbrProcHoleIndicator[pfaceI] > 0.0
+                    nbrProcIndicator[pfaceI] > 0.0
                  && eligibleAcceptors[fc[pfaceI]]
                 )
                 {
-                    // The cell on the other side is a hole, while the cell
-                    // on this side has not been marked yet neither as an
-                    // acceptor or as a hole. Append the cell to candidate
-                    // acceptors and mark it as ineligible
+                    // The cell on the other side is a hole or acceptor from
+                    // face cells of a given patch, while the cell on this side
+                    // has not been marked yet neither as an acceptor or as a
+                    // hole. Append the cell to candidate acceptors and mark it
+                    // as ineligible in order to propage the fringe on this side
                     candidateAcceptors.append(fc[pfaceI]);
                     eligibleAcceptors[fc[pfaceI]] = false;
                 }
@@ -428,6 +430,23 @@ bool Foam::overlapFringe::updateIteration
         const fvMesh& mesh = region().mesh();
         const labelListList& cc = mesh.cellCells();
 
+        // Create the processor indicator field to transfer the unsuitable
+        // acceptors to the other side
+        volScalarField processorIndicator
+        (
+            IOobject
+            (
+                "processorIndicator",
+                mesh.time().timeName(),
+                mesh,
+                IOobject::NO_READ,
+                IOobject::NO_WRITE
+            ),
+            mesh,
+            dimensionedScalar("minusOne", dimless, -1.0)
+        );
+        scalarField& processorIndicatorIn = processorIndicator.internalField();
+
         // Transfer fringeHolesPtr into the dynamic list for efficiency. Note:
         // will be transfered back at the end of the scope.
         dynamicLabelList cumFringeHoles(fringeHolesPtr_->xfer());
@@ -445,13 +464,23 @@ bool Foam::overlapFringe::updateIteration
         // Mask all current unsuitable acceptor pairs as well
         forAll (unsuitableDAPairs, upI)
         {
-            freeCells[unsuitableDAPairs[upI].acceptorCell()] = false;
+            const label& accCellI = unsuitableDAPairs[upI].acceptorCell();
+
+            freeCells[accCellI] = false;
+
+            // Mark unsuitable pair for possible processor transfer
+            processorIndicatorIn[accCellI] = 1.0;
         }
 
         // Mask all fringe holes
         forAll (cumFringeHoles, cfhI)
         {
-            freeCells[cumFringeHoles[cfhI]] = false;
+            const label& fhCellI = cumFringeHoles[cfhI];
+
+            freeCells[fhCellI] = false;
+
+            // Mark fringe hole for possible processor transfer
+            processorIndicatorIn[fhCellI] = 1.0;
         }
 
         // Create dynamic list to efficiently append new batch of
@@ -483,6 +512,53 @@ bool Foam::overlapFringe::updateIteration
 
             // Append this "old" acceptor cell into fringe holes list
             cumFringeHoles.append(accI);
+        }
+
+        // Transfer the fringe accross possible processor boundaries
+
+        // Get boundary field
+        volScalarField::GeometricBoundaryField& processorIndicatorBf =
+            processorIndicator.boundaryField();
+
+        // Evaluate coupled boundaries to perform exchange across processor
+        // boundaries
+        processorIndicatorBf.evaluateCoupled();
+
+        // Loop through boundary field
+        forAll (processorIndicatorBf, patchI)
+        {
+            // Get patch field
+            const fvPatchScalarField& chipf = processorIndicatorBf[patchI];
+
+            // Only perform acceptor search if this is a processor boundary
+            if (isA<processorFvPatchScalarField>(chipf))
+            {
+                // Get neighbour field
+                const scalarField nbrProcIndicator =
+                    chipf.patchNeighbourField();
+
+                // Get face cells
+                const unallocLabelList& fc = chipf.patch().faceCells();
+
+                // Loop through neighbouring processor field
+                forAll (nbrProcIndicator, pfaceI)
+                {
+                    if
+                    (
+                        nbrProcIndicator[pfaceI] > 0.0
+                     && freeCells[fc[pfaceI]]
+                    )
+                    {
+                        // The cell on the other side is a hole or acceptor,
+                        // while the cell on this side has not been marked yet
+                        // as an acceptor. Append the cell to new set of
+                        // acceptors and mark it as ineligible in order to
+                        // propage the fringe on this side
+                        newAcceptors.append(fc[pfaceI]);
+                        freeCells[fc[pfaceI]] = false;
+                    }
+                }
+            }
         }
 
         // Transfer back cumulative fringe holes into the fringeHolesPtr_

@@ -200,12 +200,14 @@ void Foam::oversetRegion::calcDonorAcceptorCells() const
 
             // If the overlap has not been found for this region, we need to
             // reset:
+            //  - holeCells (depend on fringe holes)
             //  - eligibleDonors (depend on fringe holes and acceptors),
             //  - cellSearch (depends on eligible donors).
             if (!regionFoundSuitableOverlap)
             {
-                deleteDemandDrivenData(eligibleDonorCellsPtr_);
-                deleteDemandDrivenData(cellSearchPtr_);
+                deleteDemandDrivenData(curRegion.holeCellsPtr_);
+                deleteDemandDrivenData(curRegion.eligibleDonorCellsPtr_);
+                deleteDemandDrivenData(curRegion.cellSearchPtr_);
             }
         }
     } while (!foundGlobalOverlap);
