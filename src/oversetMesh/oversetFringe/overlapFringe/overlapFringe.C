@@ -395,7 +395,7 @@ bool Foam::overlapFringe::updateIteration
         << nl
         << "Cumulative suitable pairs: " << nSuitablePairs
         << ", total number of pairs: " << nTotalPairs
-        << " (" << suitabilityFrac << ")%"
+        << " (" << suitabilityFrac*100 << ")%"
         << endl;
 
     // Check whether the criterion has been satisfied
