@@ -29,6 +29,8 @@ License
 #include "oversetMesh.H"
 #include "polyPatchID.H"
 #include "processorFvPatchFields.H"
+#include "oversetFvPatchFields.H"
+#include "typeInfo.H"
 #include "addToRunTimeSelectionTable.H"
 
 // * * * * * * * * * * * * * * Static Data Members * * * * * * * * * * * * * //
@@ -200,9 +202,8 @@ void Foam::overlapFringe::calcAddressing() const
     volScalarField::GeometricBoundaryField& processorIndicatorBf =
         processorIndicator.boundaryField();
 
-    // Evaluate coupled boundaries to perform exchange across processor
-    // boundaries
-    processorIndicatorBf.evaluateCoupled();
+    // Perform update accross coupled boundaries, excluding overset patch
+    evaluateNonOversetBoundaries(processorIndicatorBf);
 
     // Loop through boundary field
     forAll (processorIndicatorBf, patchI)
@@ -257,6 +258,87 @@ void Foam::overlapFringe::clearAddressing() const
     deleteDemandDrivenData(acceptorsPtr_);
     deleteDemandDrivenData(finalDonorAcceptorsPtr_);
     deleteDemandDrivenData(cumulativeDonorAcceptorsPtr_);
+}
+
+
+void Foam::overlapFringe::evaluateNonOversetBoundaries
+(
+    volScalarField::GeometricBoundaryField& psib
+) const
+{
+    // Code practically copy/pasted from GeometricBoundaryField::evaluateCoupled
+    // GeometricBoundaryField should be redesigned to accomodate for such needs
+    if
+    (
+        Pstream::defaultComms() == Pstream::blocking
+     || Pstream::defaultComms() == Pstream::nonBlocking
+    )
+    {
+        forAll(psib, patchI)
+        {
+            // Get fvPatchField
+            fvPatchScalarField& psip = psib[patchI];
+
+            if (psip.coupled() && !isA<oversetFvPatchScalarField>(psip))
+            {
+                psip.initEvaluate(Pstream::defaultComms());
+            }
+        }
+
+        // Block for any outstanding requests
+        if (Pstream::defaultComms() == Pstream::nonBlocking)
+        {
+            IPstream::waitRequests();
+            OPstream::waitRequests();
+        }
+
+        forAll(psib, patchI)
+        {
+            // Get fvPatchField
+            fvPatchScalarField& psip = psib[patchI];
+
+            if (psip.coupled() && !isA<oversetFvPatchScalarField>(psip))
+            {
+                psip.evaluate(Pstream::defaultComms());
+            }
+        }
+    }
+    else if (Pstream::defaultComms() == Pstream::scheduled)
+    {
+        const lduSchedule& patchSchedule =
+            region().mesh().globalData().patchSchedule();
+
+        forAll(patchSchedule, patchEvalI)
+        {
+            if (patchSchedule[patchEvalI].init)
+            {
+                // Get fvPatchField
+                fvPatchScalarField psip = psib[patchSchedule[patchEvalI].patch];
+
+                if (psip.coupled() && !isA<oversetFvPatchScalarField>(psip))
+                {
+                    psip.initEvaluate(Pstream::scheduled);
+                }
+            }
+            else
+            {
+                // Get fvPatchField
+                fvPatchScalarField psip = psib[patchSchedule[patchEvalI].patch];
+
+                if (psip.coupled() && !isA<oversetFvPatchScalarField>(psip))
+                {
+                    psip.evaluate(Pstream::scheduled);
+                }
+            }
+        }
+    }
+    else
+    {
+        FatalErrorIn("overlapFringe::evaluateNonOversetBoundaries()")
+            << "Unsuported communications type "
+            << Pstream::commsTypeNames[Pstream::defaultCommsType()]
+            << exit(FatalError);
+    }
 }
 
 
@@ -403,19 +485,180 @@ bool Foam::overlapFringe::updateIteration
     // Check whether the criterion has been satisfied
     if (suitabilityFrac > minGlobalFraction_)
     {
-        // At least 100*minGlobalFraction_ percent of suitable donor/acceptor
-        // pairs have been found.
-        Info<< "Finished assembling overlap fringe. " << endl;
-
         // Append unsuitable donors to the list as well
         cumDAPairs.append(unsuitableDAPairs);
 
-        // Transfer ownership of the current cumulative list to the
+        // Now that we have reached suitability criterion specified by the user,
+        // we need to clean up a bit. Namely, it is possible that a certain
+        // acceptor cell is completely surrounded by holes or other acceptor, so
+        // this cell needs to become a hole as well. For easier parallel
+        // processing, we will create an indicator field where hole and acceptor
+        // cells are marked with 1 and all the other cells (live cells) are
+        // marked with -1. We will then use this indicator field to determine
+        // whether this acceptor needs to become a hole.
+
+        // Get mesh
+        const fvMesh& mesh = region().mesh();
+
+        // Create the processor indicator field to transfer hole cells to the
+        // other side
+        volScalarField holeIndicator
+        (
+            IOobject
+            (
+                "holeIndicator_" + region().name(),
+                mesh.time().timeName(),
+                mesh,
+                IOobject::NO_READ,
+                IOobject::NO_WRITE
+            ),
+            mesh,
+            dimensionedScalar("minusOne", dimless, -1.0)
+        );
+        scalarField& holeIndicatorIn = holeIndicator.internalField();
+
+        // Transfer fringeHolesPtr into the dynamic list for efficiency. Note:
+        // will be transfered back at the end of the scope.
+        dynamicLabelList allFringeHoles(fringeHolesPtr_->xfer());
+
+        // Loop through all fringe holes and mark them
+        forAll (allFringeHoles, hcI)
+        {
+            holeIndicatorIn[allFringeHoles[hcI]] = 1.0;
+        }
+
+        // Loop through all acceptors and mark them
+        forAll (cumDAPairs, daPairI)
+        {
+            holeIndicatorIn[cumDAPairs[daPairI].acceptorCell()] = 1.0;
+        }
+
+        // Get boundary field
+        volScalarField::GeometricBoundaryField& holeIndicatorb =
+            holeIndicator.boundaryField();
+
+        // Perform update accross coupled boundaries, excluding overset patch
+        evaluateNonOversetBoundaries(holeIndicatorb);
+
+        // Get necessary mesh data
+        const cellList& meshCells = mesh.cells();
+        const unallocLabelList& own = mesh.owner();
+        const unallocLabelList& nei = mesh.neighbour();
+
+        // List of acceptors to be converted to holes
+        boolList accBecomingHoles(cumDAPairs.size(), false);
+
+        // Loop through all donor/acceptor pairs collected so far
+        forAll (cumDAPairs, daPairI)
+        {
+            // Get acceptor cell index
+            const label& accI = cumDAPairs[daPairI].acceptorCell();
+
+            // Get faces of this cell
+            const cell& accFaces = meshCells[accI];
+
+            // Create a bool whether this acceptor needs to be converted to hole
+            bool convertToHole = true;
+
+            // Loop through faces
+            forAll (accFaces, faceI)
+            {
+                // Get global face index
+                const label& gfI = accFaces[faceI];
+
+                // Check whether this is an internal face or patch face
+                if (mesh.isInternalFace(gfI))
+                {
+                    // Internal face, check whether I'm owner or neighbour
+                    if (own[gfI] == accI)
+                    {
+                        // I'm owner, check whether the neighbour is live
+                        if (holeIndicatorIn[nei[gfI]] < 0.0)
+                        {
+                            // This acceptor has a live cell for neighbour,
+                            // update the flag and continue
+                            convertToHole = false;
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        // I'm neighbour, check whether the owner is live
+                        if (holeIndicatorIn[own[gfI]] < 0.0)
+                        {
+                            // This acceptor has a live cell for neighbour,
+                            // update the flag and continue
+                            convertToHole = false;
+                            continue;
+                        }
+                    }
+                }
+                else
+                {
+                    // Get patch and face index
+                    const label patchI = mesh.boundaryMesh().whichPatch(gfI);
+                    const label pfI =
+                        mesh.boundaryMesh()[patchI].whichFace(gfI);
+
+                    // Only consider processor patches
+                    if (isA<processorPolyPatch>(mesh.boundaryMesh()[patchI]))
+                    {
+                        // Note: patch stores neighbour field after evaluation
+                        if (holeIndicatorb[patchI][pfI] < 0.0)
+                        {
+                            // This acceptor has a live cell for neighbour on
+                            // the other processor, update the flag and continue
+                            convertToHole = false;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Mark whether this acceptor cell has to be converted to hole
+            accBecomingHoles[daPairI] = convertToHole;
+        }
+
+        // Now we need to filter the data: append acceptors that need to be
+        // converted to holes into allFringeHoles and insert all other acceptors
+        // into finalDAPairs temporary container
+        // Create another dynamic list to collect final donor/acceptor pairs
+        donorAcceptorDynamicList finalDAPairs(cumDAPairs.size());
+
+        // Count number of acceptor holes that need to be converted to holes
+        label nAccToHoles = 0;
+
+        // Loop all current donor/acceptor pairs
+        forAll(cumDAPairs, daPairI)
+        {
+            if (accBecomingHoles[daPairI])
+            {
+                // Append the acceptor to list of holes
+                allFringeHoles.append(cumDAPairs[daPairI].acceptorCell());
+                ++nAccToHoles;
+            }
+            else
+            {
+                // Append the donor/acceptor pair to finalDAPairs list
+                finalDAPairs.append(cumDAPairs[daPairI]);
+            }
+        }
+
+        // Tranfer back the allFringeHoles dynamic list into member data
+        fringeHolesPtr_->transfer(allFringeHoles);
+
+        // Transfer ownership of the final donor/acceptor list to the
         // finalDonorAcceptorsPtr_
         finalDonorAcceptorsPtr_ = new donorAcceptorList
         (
-            cumulativeDonorAcceptorsPtr_->xfer()
+            finalDAPairs.xfer()
         );
+
+        // At least 100*minGlobalFraction_ % of suitable donor/acceptor pairs
+        // have been found.
+        Info<< "Converted " << nAccToHoles << " acceptors to holes."
+            << nl
+            << "Finished assembling overlap fringe. " << endl;
 
         // Set the flag to true
         updateSuitableOverlapFlag(true);
@@ -520,9 +763,8 @@ bool Foam::overlapFringe::updateIteration
         volScalarField::GeometricBoundaryField& processorIndicatorBf =
             processorIndicator.boundaryField();
 
-        // Evaluate coupled boundaries to perform exchange across processor
-        // boundaries
-        processorIndicatorBf.evaluateCoupled();
+        // Perform update accross coupled boundaries, excluding overset patch
+        evaluateNonOversetBoundaries(processorIndicatorBf);
 
         // Loop through boundary field
         forAll (processorIndicatorBf, patchI)

@@ -68,6 +68,7 @@ SourceFiles
 #include "oversetFringe.H"
 #include "donorSuitability.H"
 #include "optimisationSwitch.H"
+#include "volFields.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -127,12 +128,18 @@ class overlapFringe
         void operator=(const overlapFringe&);
 
 
-        // Calculate hole-acceptor addressing
+        //- Calculate hole-acceptor addressing
         void calcAddressing() const;
 
-        // Clear hole-acceptor addressing
+        //- Clear hole-acceptor addressing
         void clearAddressing() const;
 
+        //- Helper function used to evaluate coupled boundaries, excluding
+        //  overset patch
+        void evaluateNonOversetBoundaries
+        (
+            volScalarField::GeometricBoundaryField& psib
+        ) const;
 
 public:
 
