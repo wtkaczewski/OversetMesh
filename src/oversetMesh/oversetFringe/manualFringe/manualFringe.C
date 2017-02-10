@@ -237,10 +237,11 @@ void Foam::manualFringe::update() const
 
         // Clear out
         clearAddressing();
-
-        // Set flag to false
-        updateSuitableOverlapFlag(false);
     }
+
+    // Set flag to false and clear final donor/acceptors only
+    deleteDemandDrivenData(finalDonorAcceptorsPtr_);
+    updateSuitableOverlapFlag(false);
 }
 
 
