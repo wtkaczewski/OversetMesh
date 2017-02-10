@@ -84,12 +84,20 @@ PIMPLE
 
 relaxationFactors
 {
-    U            1;
+    equations
+    {
+        U            1;
+        UFinal       1;
+        k            0.5;
+        omega        0.5;
+    }
 
-    k            0.5;
-    omega        0.5;
-
-    mesh         1;
+    fields
+    {
+        p            1;
+        pFinal       1;
+        mesh         1;
+    }
 }
 
 

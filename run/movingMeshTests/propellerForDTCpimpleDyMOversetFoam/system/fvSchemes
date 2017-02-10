@@ -33,7 +33,7 @@ divSchemes
     div(phi,omega)    Gauss upwind;
     div(phi,epsilon)  Gauss upwind;
 
-    div((nuEff*dev(grad(U).T()))) Gauss linear;
+    div((nuEff*dev(T(grad(U)))))  Gauss linear;
 }
 
 laplacianSchemes
@@ -49,12 +49,6 @@ interpolationSchemes
 snGradSchemes
 {
     default         limited 0.5;
-}
-
-fluxRequired
-{
-    default         no;
-    p;
 }
 
 

@@ -22,17 +22,14 @@ interpolation
     type injection;
 }
 
+holePatches  ( cylinder );
+
 regions
 (
-    // Background
+    background 
     {
-        index 0;
-
         // Donor regions
-        donorRegions ( 1 );
-
-        // Names or patches that determine hole cells
-        holePatches ();
+        donorRegions ( refine );
 
         fringe
         {
@@ -42,15 +39,10 @@ regions
         }
     }
 
-    // Refine
+    refine
     {
-        index 1;
-
         // Donor regions
-        donorRegions ( 0 2 );
-
-        // Names or patches that determine hole cells
-        holePatches ();
+        donorRegions ( background front );
 
         fringe
         {
@@ -73,13 +65,9 @@ regions
         }
     }
 
-    // Cylinder
+    front 
     {
-        index 2;
-
-        donorRegions ( 1 );
-
-        holePatches  ( cylinder );
+        donorRegions ( refine );
 
         fringe
         {

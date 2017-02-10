@@ -64,5 +64,19 @@ PIMPLE
     nNonOrthogonalCorrectors 0;
 }
 
+relaxationFactors
+{
+    equations
+    {
+        U      1;
+        UFinal 1;
+    }
+    fields
+    {
+        p      1;
+        pFinal 1;
+    }
+}
+
 
 // ************************************************************************* //

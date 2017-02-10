@@ -28,7 +28,6 @@ divSchemes
 {
     default         none;
     div(phi,U)      Gauss upwind;
-//     div(phi,U)   Gauss linearUpwind cellLimited Gauss linear 1.0;  
 }
 
 laplacianSchemes
@@ -44,11 +43,6 @@ interpolationSchemes
 snGradSchemes
 {
     default         corrected;
-}
-
-fluxRequired
-{
-    p;
 }
 
 // ************************************************************************* //

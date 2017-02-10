@@ -27,7 +27,6 @@ gradSchemes
 divSchemes
 {
     default         none;
-//     div(phi,U)      Gauss GammaV 0.5;
     div(phi,U)      Gauss upwind;
 }
 
@@ -44,11 +43,6 @@ interpolationSchemes
 snGradSchemes
 {
     default         corrected;
-}
-
-fluxRequired
-{
-    p;
 }
 
 

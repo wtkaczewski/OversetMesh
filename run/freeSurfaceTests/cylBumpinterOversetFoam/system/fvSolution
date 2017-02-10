@@ -100,8 +100,14 @@ PIMPLE
 
 relaxationFactors
 {
-    U          0.8;
-    pd         0.7;
+    fields
+    {
+        pd         0.7;
+    }
+    equations
+    {
+        U          0.8;
+    }
 }
 
 

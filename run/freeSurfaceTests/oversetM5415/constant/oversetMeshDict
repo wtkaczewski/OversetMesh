@@ -21,8 +21,7 @@ interpolation
     type injection;
 }
 
-// Names or patches that determine hole cells
-holePatches ();
+holePatches ( bilgeKeel deck hull);
 
 regions
 (
@@ -45,8 +44,6 @@ regions
     hull
     {
         donorRegions ( background );
-
-        holePatches ( bilgeKeel deck hull);
 
         fringe
         {

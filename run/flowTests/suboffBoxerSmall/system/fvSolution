@@ -67,10 +67,16 @@ SIMPLE
 
 relaxationFactors
 {
-    U      0.7;
-    p      0.3;
-    k      0.7;
-    omega  0.7;
+    equations
+    {
+        U      0.7;
+        k      0.7;
+        omega  0.7;
+    }
+    fields
+    {
+        p      0.3;
+    }
 }
 
 

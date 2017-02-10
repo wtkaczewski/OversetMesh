@@ -28,7 +28,6 @@ divSchemes
 {
     default         none;
     div(phi,U)      Gauss upwind;
-//    div(phi,U)      Gauss linearUpwind Gauss linear;
     div(phi,k)      Gauss upwind;
     div(phi,omega)  Gauss upwind;
 
@@ -38,7 +37,6 @@ divSchemes
 laplacianSchemes
 {
    default         Gauss linear corrected;
-//    default         Gauss linear uncorrected;
 
    laplacian(DkEff,k)                  Gauss linear limited 0.5;
    laplacian(DomegaEff,omega)          Gauss linear limited 0.5;
@@ -54,9 +52,5 @@ snGradSchemes
     default         limited 0.5;
 }
 
-fluxRequired
-{
-    p;
-}
 
 // ************************************************************************* //

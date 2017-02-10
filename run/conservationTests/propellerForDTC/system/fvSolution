@@ -39,7 +39,10 @@ PISO
 
 relaxationFactors
 {
-    p           1;
+    fields
+    {
+        p           1;
+    }
 }
 
 

@@ -33,10 +33,13 @@ regions
         {
             type overlap;
 
+            suitablePairFraction 0.5;
+            cacheFringe          no;
+
             donorSuitability
             {
-                type      noSuitability;
-                threshold 1;
+                type      cellVolumes;
+                threshold 0.99;
             }
         }
     }

@@ -39,11 +39,10 @@ runApplication setSet -batch setBatch2.batch
 \cp -f boundary constant/polyMesh/boundary
 
 # Run serial
-#runApplication $application1
-#runApplication $application2
+runApplication $application1
+runApplication $application2
 
 #runApplication decomposePar -cellDist
 #runApplication decomposeSets -writeEmptySets
 #runParallel $application1 3
 #runParallel $application2 3
-

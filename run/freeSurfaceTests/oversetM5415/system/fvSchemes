@@ -52,13 +52,5 @@ snGradSchemes
     default         limited 0.5;
 }
 
-fluxRequired
-{
-    pd;
-    pcorr;
-
-    // potentialOversetFoam
-    p;
-}
 
 // ************************************************************************* //

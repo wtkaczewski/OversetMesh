@@ -27,7 +27,7 @@ gradSchemes
 divSchemes
 {
     default         none;
-    div(phi,U)      Gauss linearUpwind leastSquares;
+    div(phi,U)      Gauss linearUpwind gradU;
 
     div(phi,k)      Gauss upwind;
     div(phi,omega)  Gauss upwind;
@@ -48,14 +48,6 @@ interpolationSchemes
 snGradSchemes
 {
     default         limited 0.5;
-}
-
-fluxRequired
-{
-    default         no;
-    pd;
-    p;
-    alpha1;
 }
 
 
