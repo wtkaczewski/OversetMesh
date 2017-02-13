@@ -859,29 +859,8 @@ Foam::donorAcceptorList& Foam::overlapFringe::finalDonorAcceptors() const
             << abort(FatalError);
     }
 
-    return *finalDonorAcceptorsPtr_;
-}
-
-
-void Foam::overlapFringe::update() const
-{
-    Info<< "overlapFringe::update() const" << endl;
-
     if (cacheFringe_)
     {
-        if (!finalDonorAcceptorsPtr_)
-        {
-            FatalErrorIn("overlapFringe::update()")
-                << "finalDonorAcceptorPtr_ not allocated. Make sure you have "
-                << "called overlapFringe::updateIteration() before "
-                << "overlapFringe::update()."
-                << abort(FatalError);
-        }
-
-        // If the cache is switched on, simply copy the acceptors from
-        // finalDonorAcceptors into the acceptor list, leaving acceptorPtr_ and
-        // fringeHolesPtr_ valid and thus avoiding calling calcAddressing.
-
         // Get reference to final donor/acceptor pairs
         const donorAcceptorList& finalDAPairs = *finalDonorAcceptorsPtr_;
 
@@ -901,8 +880,29 @@ void Foam::overlapFringe::update() const
             acceptors[daPairI] = finalDAPairs[daPairI].acceptorCell();
         }
 
-        // Note: fringe holes actually hold the complete list, simply do not
-        // delete them
+        // Note: fringe holes actually hold the complete list, there's nothing
+        // to do
+        Info<< "Cached "
+            << returnReduce<label>(acceptorsPtr_->size(), sumOp<label>())
+            << " acceptors and "
+            << returnReduce<label>(fringeHolesPtr_->size(), sumOp<label>())
+            << " fringe holes for region: " << region().name()
+            << endl;
+    }
+
+    return *finalDonorAcceptorsPtr_;
+}
+
+
+void Foam::overlapFringe::update() const
+{
+    Info<< "overlapFringe::update() const" << endl;
+
+    if (cacheFringe_)
+    {
+        // If the cache is switched on, simply do not clear acceptorsPtr_ and
+        // fringeHolesPtr_ which now hold all final acceptors and holes that
+        // will be used to start the next iteration
 
         // Now clear final and cumulative donor acceptors
         deleteDemandDrivenData(finalDonorAcceptorsPtr_);
