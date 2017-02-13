@@ -107,6 +107,7 @@
     om.setRefCell(p, pimple.dict(), pRefCell, pRefValue);
 
     mesh.schemesDict().setFluxRequired(pd.name());
+    mesh.schemesDict().setFluxRequired(alpha1.name());
 
     // Construct interface from alpha1 distribution
     interfaceProperties interface(alpha1, U, twoPhaseProperties);

@@ -935,6 +935,28 @@ void Foam::oversetMesh::calcInterpolationMap() const
 
     // The construct map is simply an offset of the index by a number of values
     // received by previous processors
+    // Example:
+    /*
+       Procs sending to me | Number of items being sent
+      --------------------------------------------------
+              P0           |             1              
+              P1           |             7              
+              P5           |             2              
+              .            |             .
+              .            |             .
+              .            |             .
+
+        Received data has the following form:
+        (
+            a_0, (one value from proc 0)
+            a_1, a_2, a_3, a_4, a_5, a_6, a_7 (seven values from proc 1)
+            a_8, a_9 (two values from proc 5)
+            ...
+            ...
+            ...
+    */
+
+    // Create construct map
     labelListList constructDataMap(Pstream::nProcs());
 
     // Counter for offset

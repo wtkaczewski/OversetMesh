@@ -61,8 +61,8 @@ void Foam::compositeFringe::readBaseFringes(const dictionary& dict)
             )
         );
     }
-
 }
+
 
 void Foam::compositeFringe::calcAddressing() const
 {
@@ -99,7 +99,7 @@ void Foam::compositeFringe::calcAddressing() const
             }
         }
 
-        const labelList& ca = baseFringes_[bfI].acceptors();
+        const labelList& ca = baseFringes_[bfI].candidateAcceptors();
 
         forAll (ca, caI)
         {
@@ -120,10 +120,11 @@ void Foam::compositeFringe::calcAddressing() const
 }
 
 
-void Foam::compositeFringe::clearAddressing()
+void Foam::compositeFringe::clearAddressing() const
 {
     deleteDemandDrivenData(fringeHolesPtr_);
     deleteDemandDrivenData(acceptorsPtr_);
+    deleteDemandDrivenData(finalDonorAcceptorsPtr_);
 }
 
 
@@ -139,7 +140,8 @@ Foam::compositeFringe::compositeFringe
 :
     oversetFringe(mesh, region, dict),
     fringeHolesPtr_(NULL),
-    acceptorsPtr_(NULL)
+    acceptorsPtr_(NULL),
+    finalDonorAcceptorsPtr_(NULL)
 {
     // Read fringes
     readBaseFringes(dict);
@@ -156,6 +158,37 @@ Foam::compositeFringe::~compositeFringe()
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
+bool Foam::compositeFringe::updateIteration
+(
+    donorAcceptorList& donorAcceptorRegionData
+) const
+{
+    // If the donorAcceptor list has been allocated, something went wrong with
+    // the iteration procedure (not-updated flag): this function has been called
+    // more than once, which should not happen for compositeFringe
+    if (finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("compositeFringe::updateIteration(donorAcceptorList&")
+            << "finalDonorAcceptorPtr_ already allocated. Something went "
+            << "wrong with the iteration procedure (flag was not updated)."
+            << nl << "This should not happen for compositeFringe."
+            << abort(FatalError);
+    }
+
+    // Allocate the list by reusing the argument list
+    finalDonorAcceptorsPtr_ = new donorAcceptorList
+    (
+        donorAcceptorRegionData,
+        true
+    );
+
+    // Set the flag to true and return
+    updateSuitableOverlapFlag(true);
+
+    return foundSuitableOverlap();
+}
+
+
 const Foam::labelList& Foam::compositeFringe::fringeHoles() const
 {
     if (!fringeHolesPtr_)
@@ -167,7 +200,7 @@ const Foam::labelList& Foam::compositeFringe::fringeHoles() const
 }
 
 
-const Foam::labelList& Foam::compositeFringe::acceptors() const
+const Foam::labelList& Foam::compositeFringe::candidateAcceptors() const
 {
     if (!acceptorsPtr_)
     {
@@ -178,14 +211,41 @@ const Foam::labelList& Foam::compositeFringe::acceptors() const
 }
 
 
+Foam::donorAcceptorList& Foam::compositeFringe::finalDonorAcceptors() const
+{
+    if (!finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("compositeFringe::finalDonorAcceptors()")
+            << "finalDonorAcceptorPtr_ not allocated. Make sure you have "
+            << "called compositeFringe::updateIteration() before asking for "
+            << "final set of donor/acceptor pairs."
+            << abort(FatalError);
+    }
+
+    if (!foundSuitableOverlap())
+    {
+        FatalErrorIn("compositeFringe::finalDonorAcceptors()")
+            << "Attemted to access finalDonorAcceptors but suitable overlap "
+            << "has not been found. This is not allowed. "
+            << abort(FatalError);
+    }
+
+    return *finalDonorAcceptorsPtr_;
+}
+
+
 void Foam::compositeFringe::update() const
 {
     Info<< "void compositeFringe::update() const" << endl;
 
     forAll (baseFringes_, bfI)
     {
+        // Update current base fringe
         baseFringes_[bfI].update();
     }
+
+    // Update flag for composite fringe
+    updateSuitableOverlapFlag(false);
 }
 
 

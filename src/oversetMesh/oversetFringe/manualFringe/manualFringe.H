@@ -31,6 +31,9 @@ Description
 Author
     Hrvoje Jasak, Wikki Ltd.  All rights reserved.
 
+Contributor
+    Vuko Vukcevic, Wikki Ltd.  All rights reserved.
+
 SourceFiles
     manualFringe.C
 
@@ -67,6 +70,13 @@ class manualFringe
 
         //- Acceptor cells
         mutable labelList* acceptorsPtr_;
+
+        //- Final donor/acceptor pairs for this region (fringe)
+        mutable donorAcceptorList* finalDonorAcceptorsPtr_;
+
+        //- Switch whether to update acceptors/donors for possible changes in
+        //  cell sets (switched off by default)
+        const Switch updateFringe_;
 
 
     // Private Member Functions
@@ -109,13 +119,23 @@ public:
 
     // Member Functions
 
+        //- Update iteration. Note: invalidates parameter
+        virtual bool updateIteration
+        (
+            donorAcceptorList& donorAcceptorRegionData
+        ) const;
+
         //- Return list of deactivated (hole) cells
         //  Fringe hole cells are collected in addition to geometric hole
         //  cells, which fall outside of all donor regions
         virtual const labelList& fringeHoles() const;
 
         //- Return list of acceptor cells
-        virtual const labelList& acceptors() const;
+        virtual const labelList& candidateAcceptors() const;
+
+        //- Return list of final donor acceptor pairs. Note: caller may
+        //  invalidate finalDonorAcceptorsPtr_ for optimisation purposes
+        virtual donorAcceptorList& finalDonorAcceptors() const;
 
         //- Update the fringe
         virtual void update() const;

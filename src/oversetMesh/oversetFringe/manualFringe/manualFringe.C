@@ -116,6 +116,7 @@ void Foam::manualFringe::clearAddressing() const
 {
     deleteDemandDrivenData(fringeHolesPtr_);
     deleteDemandDrivenData(acceptorsPtr_);
+    deleteDemandDrivenData(finalDonorAcceptorsPtr_);
 }
 
 
@@ -133,7 +134,12 @@ Foam::manualFringe::manualFringe
     holesSetName_(dict.lookup("holes")),
     acceptorsSetName_(dict.lookup("acceptors")),
     fringeHolesPtr_(NULL),
-    acceptorsPtr_(NULL)
+    acceptorsPtr_(NULL),
+    finalDonorAcceptorsPtr_(NULL),
+    updateFringe_
+    (
+        dict.lookupOrDefault<Switch>("updateAcceptors", false)
+    )
 {}
 
 
@@ -147,6 +153,37 @@ Foam::manualFringe::~manualFringe()
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
+bool Foam::manualFringe::updateIteration
+(
+    donorAcceptorList& donorAcceptorRegionData
+) const
+{
+    // If the donorAcceptor list has been allocated, something went wrong with
+    // the iteration procedure (not-updated flag): this function has been called
+    // more than once, which should not happen for manualFringe
+    if (finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("manualFringe::updateIteration(donorAcceptorList&)")
+            << "finalDonorAcceptorPtr_ already allocated. Something went "
+            << "wrong with the iteration procedure (flag was not updated)."
+            << nl << "This should not happen for manualFringe."
+            << abort(FatalError);
+    }
+
+    // Allocate the list by reusing the argument list
+    finalDonorAcceptorsPtr_ = new donorAcceptorList
+    (
+        donorAcceptorRegionData,
+        true
+    );
+
+    // Set the flag to true and return
+    updateSuitableOverlapFlag(true);
+
+    return foundSuitableOverlap();
+}
+
+
 const Foam::labelList& Foam::manualFringe::fringeHoles() const
 {
     if (!fringeHolesPtr_)
@@ -158,7 +195,7 @@ const Foam::labelList& Foam::manualFringe::fringeHoles() const
 }
 
 
-const Foam::labelList& Foam::manualFringe::acceptors() const
+const Foam::labelList& Foam::manualFringe::candidateAcceptors() const
 {
     if (!acceptorsPtr_)
     {
@@ -169,11 +206,42 @@ const Foam::labelList& Foam::manualFringe::acceptors() const
 }
 
 
+Foam::donorAcceptorList& Foam::manualFringe::finalDonorAcceptors() const
+{
+    if (!finalDonorAcceptorsPtr_)
+    {
+        FatalErrorIn("manualFringe::finalDonorAcceptors()")
+            << "finalDonorAcceptorPtr_ not allocated. Make sure you have "
+            << "called manualFringe::updateIteration() before asking for "
+            << "final set of donor/acceptor pairs."
+            << abort(FatalError);
+    }
+
+    if (!foundSuitableOverlap())
+    {
+        FatalErrorIn("manualFringe::finalDonorAcceptors()")
+            << "Attemted to access finalDonorAcceptors but suitable overlap "
+            << "has not been found. This is not allowed. "
+            << abort(FatalError);
+    }
+
+    return *finalDonorAcceptorsPtr_;
+}
+
+
 void Foam::manualFringe::update() const
 {
-    Info<< "manualFringe::update() const" << endl;
+    if (updateFringe_)
+    {
+        Info<< "manualFringe::update() const" << endl;
 
-    clearAddressing();
+        // Clear out
+        clearAddressing();
+    }
+
+    // Set flag to false and clear final donor/acceptors only
+    deleteDemandDrivenData(finalDonorAcceptorsPtr_);
+    updateSuitableOverlapFlag(false);
 }
 
 

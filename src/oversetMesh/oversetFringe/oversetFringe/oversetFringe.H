@@ -32,13 +32,15 @@ Description
     - is owned by a particular oversetRegion
     - defines the hole cells for its region
     - defines acceptor cells for its region
-
-    Donor cells are calculated by oversetRegion, using a list of
-    acceptor cells and
-
+    - controls the iterative process for finding suitable overlap (as needed by
+      overlapFringe algorithm)
+    - defines donorAcceptorList used by oversetRegion to create combined data
 
 Author
     Hrvoje Jasak, Wikki Ltd.  All rights reserved.
+
+Contributor
+    Vuko Vukcevic, Wikki Ltd.  All rights reserved.
 
 SourceFiles
     oversetFringe.C
@@ -53,6 +55,7 @@ SourceFiles
 #include "fvMesh.H"
 #include "typeInfo.H"
 #include "runTimeSelectionTables.H"
+#include "donorAcceptorList.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -75,6 +78,9 @@ class oversetFringe
         //- Reference to oversetRegion
         const oversetRegion& region_;
 
+        //- Flag indicating whether a suitable overlap has been found
+        mutable bool foundSuitableOverlap_;
+
 
     // Private Member Functions
 
@@ -83,6 +89,18 @@ class oversetFringe
 
         //- Disallow default bitwise assignment
         void operator=(const oversetFringe&);
+
+
+protected:
+
+    // Protected Member Functions
+
+        //- Set whether a suitable overlap has been found (called by derived
+        //  classes during calls to updateIteration())
+        void updateSuitableOverlapFlag(const bool isFound) const
+        {
+            foundSuitableOverlap_ = isFound;
+        }
 
 
 public:
@@ -145,17 +163,42 @@ public:
                 return mesh_;
             }
 
-            //- Return access to region
-            const oversetRegion& region() const;
+            //- Return reference to region
+            const oversetRegion& region() const
+            {
+                return region_;
+            }
 
 
-        //- Return list of deactivated (hole) cells
-        //  Fringe hole cells are collected in addition to geometric hole
-        //  cells, which fall outside of all donor regions
-        virtual const labelList& fringeHoles() const = 0;
+        // Iteration control
 
-        //- Return list of acceptor cells
-        virtual const labelList& acceptors() const = 0;
+            //- Has a suitable overlap been found for this fringe (region)?
+            bool foundSuitableOverlap() const
+            {
+                return foundSuitableOverlap_;
+            }
+
+            //- Update iteration, returns whether a suitable fringe has been
+            //  found
+            virtual bool updateIteration
+            (
+                donorAcceptorList& donorAcceptorRegionData
+            ) const = 0;
+
+
+        // Access to fringe data
+
+            //- Return list of deactivated (hole) cells
+            //  Fringe hole cells are collected in addition to geometric hole
+            //  cells, which fall outside of all donor regions
+            virtual const labelList& fringeHoles() const = 0;
+
+            //- Return list of candidate acceptor cells
+            virtual const labelList& candidateAcceptors() const = 0;
+
+            //- Return reference to final donor acceptor pairs
+            virtual donorAcceptorList& finalDonorAcceptors() const = 0;
+
 
         //- Update the fringe
         virtual void update() const = 0;

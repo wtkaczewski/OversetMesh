@@ -45,16 +45,9 @@ Foam::oversetFringe::oversetFringe
 )
 :
     mesh_(mesh),
-    region_(region)
+    region_(region),
+    foundSuitableOverlap_(false)
 {}
-
-
-// * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * * //
-
-const Foam::oversetRegion& Foam::oversetFringe::region() const
-{
-    return region_;
-}
 
 
 // ************************************************************************* //

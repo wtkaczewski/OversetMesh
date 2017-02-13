@@ -94,6 +94,10 @@ void oversetFvPatchField<Type>::oversetInterpolate
             opf.setConservativeCorrection(ccOrig);
         }
     }
+
+    // After we have performed overset interpolation, we need to make sure that
+    // the data correct data is transferred across processor boundaries
+    psi.boundaryField().evaluateCoupled();
 }
 
 // * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //

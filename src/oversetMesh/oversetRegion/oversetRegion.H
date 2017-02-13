@@ -36,8 +36,56 @@ Description
 
     Overset region provides data on
     - cells within region (local processor)
-    - local acceptor and hole cells
+    - local acceptor, donor and hole cells
     - eligible local donors: cells that are neither acceptors nor holes
+
+    Overset region controls the iterative process of fringe assembly with the
+    help of fringe selection algorithm. The flowchart of the algorithm is:
+    1. Someone (usually oversetMesh) asks region for donors and acceptors, which
+       triggers the lazy evaluation in calcDonorAcceptorCells(). During the
+       donor/acceptor assembly, all regions are interdependent because eligible
+       donors and holes could change during the iterative process. Hence, asking
+       a certain region for its donors/acceptors actually triggers the fringe
+       assembly in all regions,
+    2. The iterative process starts by going through each region, updating
+       current donor/acceptors (see updateDonorAcceptors) which does the
+       following:
+       - Asks fringe handler a set of "fresh" acceptors,
+       - Finds donors for these acceptors,
+       - Ships of donor/acceptor pairs to fringe handler, which decided whether
+         a suitable overlap has been found
+    3. If the suitable overlap has been found for ALL regions, then we finalise
+       the donor/acceptor pairs by calling finaliseDonorAcceptors(), which
+       actually allocates requested fields (acceptorCells and donorCells)
+
+Ideas to further improve efficiency
+    1. During the possibly iterative process of finding suitable overlap with
+       the help of fringe selection algorithm (see calcDonorAcceptorCells()), we
+       are sending/receiving full donorAcceptor objects. A single donor/acceptor
+       object holds: donor and acceptor cell numbers, processor IDs and cell
+       centres. On top of that, it holds additional "extended donors" for a
+       given acceptor, which is a list containing eligible neighbouring donors
+       for a given "master" donor (see donorAcceptor). Something might be gained
+       if we do the following:
+           - Create a bareDonorAcceptor class which will hold only the data
+             required by the iterative process (e.g. acceptor cell centre, donor
+             cell number, processor ID and cell centre). Then when the iterative
+             process is finished, simply finalise the data by extending bare
+             data and communicate it once again.
+           - As a first step, it would be sufficient just to remove the search
+             for extended donors during the iterative process.
+    2. I've written the iterative process in a way that it works both for serial
+       and parallel runs (enabled by mapDistribute class design), which means
+       that we might have significant overhead when doing serial runs due to
+       unnecessary allocations, indirections and access. I've written it this
+       way since I currently do not care about loss of efficiency for serial
+       runs. VV, 2/Feb/2017.
+
+Author
+    Hrvoje Jasak, Wikki Ltd.  All rights reserved.
+
+Contributor
+    Vuko Vukcevic, Wikki Ltd.  All rights reserved.
 
 SourceFiles
     oversetRegion.C
@@ -112,7 +160,10 @@ class oversetRegion
         //  donor regions to the acceptor cell
         mutable donorAcceptorList* donorCellsPtr_;
 
-        //- Hole cell labels
+        //- Cut hole cell labels
+        mutable labelList* cutHoleCellsPtr_;
+
+        //- Complete hole cell labels (cut + fringe holes)
         mutable labelList* holeCellsPtr_;
 
         //- Eligible donor cells from current region
@@ -144,6 +195,14 @@ class oversetRegion
             mutable indexedOctree<treeDataCell>* cellSearchPtr_;
 
 
+            // Data for optimizing parallel comms
+
+                //- List of bounding boxes for each region on each processor,
+                //  e.g. procBoundBoxes[3][2] contains a bounding box of region
+                //  2 on processor 3
+                mutable List<List<boundBox> >* procBoundBoxesPtr_;
+
+
         //- Donor fill-in.  One in donorFraction cells is expected to be
         //  a donor
         static const debug::optimisationSwitch donorFraction;
@@ -170,7 +229,10 @@ class oversetRegion
         //- Calculate donor and acceptor cells
         void calcDonorAcceptorCells() const;
 
-        //- Calculate hole cells
+        //- Calculate cut hole cells
+        void calcCutHoleCells() const;
+
+        //- Calculate complete hole cells (cut + fringe)
         void calcHoleCells() const;
 
         //- Calculate eligible donor cells
@@ -182,8 +244,20 @@ class oversetRegion
         //- Calculate cell octree
         void calcCellSearch() const;
 
+        //- Calculate bounding boxes on all processors
+        void calcProcBoundBoxes() const;
+
         //- Clear all data
         void clearOut() const;
+
+        //- Update donor/acceptors for global overset fringe algorithm control
+        //  (called within calcDonorAcceptorCells(), even from other regions).
+        //  Returns true if this region found suitable set of donors
+        bool updateDonorAcceptors() const;
+
+        //- Finalise donor/acceptor, called within calcDonorAcceptorCells()
+        //  after a suitable overlap has been found for all regions
+        void finaliseDonorAcceptors() const;
 
 
 public:
@@ -245,14 +319,17 @@ public:
                 return mesh_.cellZones()[zoneIndex()];
             }
 
+            //- Return region cell labels (implemented in terms of zone())
+            const labelList& regionCells() const
+            {
+                return zone();
+            }
+
             //- Return list of donor region indices
             const labelList& donorRegions() const;
 
             //- Return list of acceptor region indices
             const labelList& acceptorRegions() const;
-
-            //- Return region cell labels
-            const labelList& regionCells() const;
 
 
         // Donor-acceptor addressing
@@ -263,7 +340,10 @@ public:
             //- Return donor cell list
             const donorAcceptorList& donors() const;
 
-            //- Return hole cell list
+            //- Return cut holes only
+            const labelList& cutHoles() const;
+
+            //- Return complete hole cell list (cut + fringe holes)
             const labelList& holes() const;
 
             //- Return eligible donor cell list
@@ -293,6 +373,16 @@ public:
             //- Return cell octree for search in local region
             //  Only eligible donors are added to the list
             const indexedOctree<treeDataCell>& cellSearch() const;
+
+
+            // Function for avoiding unnecessary parallel comms overheads
+
+                //- Return list of region bounding boxes for each processor.
+                //  Used to optimize out parallel comms since there is no need
+                //  to send the acceptor data to a certain processor if the
+                //  bounding box of the donor region on a given processor does
+                //  not contain acceptor point
+                const List<List<boundBox> >& procBoundBoxes() const;
 
 
         //- Update for topo change or mesh motion

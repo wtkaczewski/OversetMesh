@@ -28,7 +28,33 @@ Class
 Description
     Overlap fringe algorithm
 
+    Holds and manages following data:
+
+      - fringeHolesPtr_: holds fringe holes which are basically discarded
+        acceptors from previous iterations
+      - acceptorsPtr_: holds current set of acceptors to consider
+      - finalDonorAcceptorsPtr_: final set of donor/acceptors which will be used
+        for the overset interpolation
+      - donorSuitability_: run-time selectable Donor Suitability Function
+      - initPatchNames_: optional list of patches that we use to start the
+        acceptor search from
+      - minGlobalFraction_: minimum allowable global fraction of suitable pairs
+      - cumulativeDonorAcceptorsPtr_: list of suitable donor/acceptor pairs
+      - cacheFringe_: switch to control whether to cache the fringe for next
+        mesh updates (start from latest suitable set of acceptors, rather than
+        from the beginning)
+      - fringeIter_: iteration counter
+
+    Member function updateIteration controls the iterative process:
+      - Checks whether given donor/acceptors are suitable and filters them,
+      - If the user-specified criterion controlled by minGlobalFraction_ is not
+        reached (i.e. suitable overlap has not been found), then we loop through
+        unsuitable acceptors and mark their neighbours (excluding existing
+        acceptors and holes) as candidate acceptors for the next iteration,
+      - Unsuitable acceptors become fringe holes.
+
 Author
+    Vuko Vukcevic, Wikki Ltd.  All rights reserved.
     Hrvoje Jasak, Wikki Ltd.  All rights reserved.
 
 SourceFiles
@@ -42,6 +68,7 @@ SourceFiles
 #include "oversetFringe.H"
 #include "donorSuitability.H"
 #include "optimisationSwitch.H"
+#include "volFields.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -64,14 +91,32 @@ class overlapFringe
         //- Acceptor cells
         mutable labelList* acceptorsPtr_;
 
-        //- Run-time selectable overlap minimisation algorithm
-        autoPtr<donorSuitability::donorSuitability> donorSuitability_;
+        //- Final donor/acceptor pairs for this region (fringe)
+        mutable donorAcceptorList* finalDonorAcceptorsPtr_;
 
-    
-    //- Bounding box expansion factor. Eligible acceptor cells for the overlap
-    //  fringe are automatically collected as cells within bounding box of a
-    //  donor region. This bounding box is slightly expanded for robustness.
-    static const debug::optimisationSwitch boundBoxExpansionFactor;
+
+        // Data for iteration control
+
+            //- Run-time selectable donor/acceptor suitability handler
+            autoPtr<donorSuitability::donorSuitability> donorSuitability_;
+
+            //- List of patches to start the iterative fringe assembly process
+            //  (empty list by default)
+            const wordList initPatchNames_;
+
+            //- Minimum global fraction of suitable donors. Iteration process
+            //  stops if the calculated fraction is greater than the minimum
+            //  allowable fraction
+            const scalar minGlobalFraction_;
+
+            //- Worker dynamic list of donor/acceptor pairs for efficiency
+            mutable donorAcceptorDynamicList* cumulativeDonorAcceptorsPtr_;
+
+            //- Switch to control cacheing
+            Switch cacheFringe_;
+
+            //- Iteration counter
+            mutable label fringeIter_;
 
 
     // Private Member Functions
@@ -83,12 +128,18 @@ class overlapFringe
         void operator=(const overlapFringe&);
 
 
-        // Calculate hole-acceptor addressing
+        //- Calculate hole-acceptor addressing
         void calcAddressing() const;
 
-        // Clear hole-acceptor addressing
+        //- Clear hole-acceptor addressing
         void clearAddressing() const;
 
+        //- Helper function used to evaluate coupled boundaries, excluding
+        //  overset patch
+        void evaluateNonOversetBoundaries
+        (
+            volScalarField::GeometricBoundaryField& psib
+        ) const;
 
 public:
 
@@ -114,13 +165,23 @@ public:
 
     // Member Functions
 
+        //- Update iteration.
+        virtual bool updateIteration
+        (
+            donorAcceptorList& donorAcceptorRegionData
+        ) const;
+
         //- Return list of hole cells
         //  Fringe hole cells are collected in addition to geometric hole
         //  cells, which fall outside of all donor regions
         virtual const labelList& fringeHoles() const;
 
         //- Return list of acceptor cells
-        virtual const labelList& acceptors() const;
+        virtual const labelList& candidateAcceptors() const;
+
+        //- Return list of final donor acceptor pairs. Note: caller may
+        //  invalidate finalDonorAcceptorsPtr_ for optimisation purposes
+        virtual donorAcceptorList& finalDonorAcceptors() const;
 
         //- Update the fringe
         virtual void update() const;
