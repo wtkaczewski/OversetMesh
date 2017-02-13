@@ -370,7 +370,7 @@ Foam::overlapFringe::overlapFringe
         readScalar(dict.lookup("suitablePairFraction"))
     ),
     cumulativeDonorAcceptorsPtr_(NULL),
-    cacheFringe_(dict.lookup("cacheFringe")),
+    cacheFringe_(dict.lookupOrDefault<Switch>("cacheFringe", false)),
     fringeIter_(0)
 {
     // Sanity check
