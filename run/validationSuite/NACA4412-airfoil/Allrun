@@ -20,7 +20,9 @@ using 1:($4/368.018) title 'Explicit overset', \
 './implicitNonConservativeOverset/p_solidWall.raw' \
 using 1:($4/368.018) title 'Implicit non-conservative overset', \
 './implicitConservativeOverset/p_solidWall.raw' \
-using 1:($4/368.018) title 'Implicit conservative overset' ;
+using 1:($4/368.018) title 'Implicit conservative overset', \
+'./noOverset/p_solidWall.raw' \
+using 1:($4/368.018) title 'Single mesh' ;
 
 EOF
 

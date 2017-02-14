@@ -31,27 +31,33 @@ solvers
     {
         solver           BiCGStab;
         preconditioner   DILU;
+
         tolerance        1e-08;
         relTol           0.01;
         minIter          1;
+        maxIter          10;
     }
 
     k
     {
-        solver           BiCGStab;
-        preconditioner   DILU; 
+        solver           smoothSolver;
+        smoother         GaussSeidel;
+
         tolerance        1e-08;
         relTol           0.1;
         minIter          1;
+        maxIter          10;
     }
 
-	omega
+    omega
     {
-        solver           BiCGStab;
-        preconditioner   DILU; 
+        solver           smoothSolver;
+        smoother         GaussSeidel;
+
         tolerance        1e-08;
         relTol           0.1;
         minIter          1;
+        maxIter          10;
     }
 }
 

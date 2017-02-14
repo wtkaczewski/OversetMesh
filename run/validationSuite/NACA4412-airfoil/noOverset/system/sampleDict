@@ -14,32 +14,28 @@ FoamFile
     object      sampleDict;
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
 interpolationScheme cellPoint;
 surfaceFormat raw;
 
 setFormat   gnuplot;
 
+sets ();
 
-sets
-();
-
-fields (
-p
-);
+fields (p);
 
 surfaces
 (
-
-        solidWall
-        {
+    solidWall
+    {
         type        patch;
         patchName   solidWall;
-        rhoName rhoInf;
-        rhoInf 1.0; //Reference density for fluid
-        outputInterval: 1.0
+        rhoName     rhoInf;
+        rhoInf      1.0; //Reference density for fluid
+        outputInterval 1.0;
         interpolate    true;
         triangulate    false;
-        }       
+    }       
 );
 
 

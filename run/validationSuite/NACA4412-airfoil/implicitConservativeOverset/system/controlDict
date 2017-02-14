@@ -22,7 +22,7 @@ startTime       0;
 
 stopAt          endTime;
 
-endTime         10000;
+endTime         5000;
 
 deltaT          1;
 
@@ -43,32 +43,5 @@ timeFormat      general;
 timePrecision   6;
 
 runTimeModifiable yes;
-
-functions
-(
-    forces
-    {
-        type forceCoeffs;
-        functionObjectLibs ("libforces.so");
-        patches (airfoil);
-
-        pName p;
-        UName U;
-        rhoName rhoInf;
-        rhoInf 1;
-
-        outputControl timeStep;
-        outputInterval 1;
-        log	true;
-
-        CofR (0.25 0 0);
-        liftDir (-0.239719744 0 0.970842132);
-        dragDir (0.970842132  0 0.239719744);
-        magUInf 27.13;
-        lRef	0.901;
-        Aref	0.901;
-        pitchAxis (0 1 0);
-    }
-);
 
 // ************************************************************************* //

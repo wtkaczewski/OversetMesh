@@ -27,11 +27,14 @@ boundaryField
     }
     inlet
     {
-        type            zeroGradient;
+        type            outletInlet;
+        outletValue     uniform 0;
+        value           uniform 0;
     }
     outlet
     {
-        type            fixedValue;
+        type            outletInlet;
+        outletValue     uniform 0;
         value           uniform 0;
     }
     solidWall

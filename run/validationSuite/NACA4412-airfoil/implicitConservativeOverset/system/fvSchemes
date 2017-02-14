@@ -28,7 +28,7 @@ divSchemes
 {
     default             none;
 
-    div(phi,U)          Gauss linearUpwind default;
+    div(phi,U)          Gauss linearUpwindV default;
     div(phi,k)          Gauss upwind;
     div(phi,omega)      Gauss upwind;
 
