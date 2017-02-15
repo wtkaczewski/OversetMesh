@@ -18,7 +18,9 @@ FoamFile
 
 interpolation
 {
-    type injection;
+    interpolationSchemes (injection);
+
+    default injection;
 }
 
 // Names or patches that determine hole cells

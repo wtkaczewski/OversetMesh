@@ -18,7 +18,9 @@ FoamFile
 
 interpolation
 {
-    type inverseDistance;
+    interpolationSchemes (inverseDistance);
+
+    default inverseDistance;
 }
 
 // Names or patches that determine hole cells
