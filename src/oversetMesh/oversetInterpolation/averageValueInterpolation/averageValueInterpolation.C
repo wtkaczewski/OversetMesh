@@ -38,7 +38,7 @@ namespace Foam
     (
         oversetInterpolation,
         averageValueInterpolation,
-        dictionary
+        word
     );
 }
 
@@ -104,10 +104,10 @@ void Foam::averageValueInterpolation::clearWeights() const
 Foam::averageValueInterpolation::averageValueInterpolation
 (
     const oversetMesh& overset,
-    const dictionary& dict
+    const word& name
 )
 :
-    oversetInterpolation(overset, dict),
+    oversetInterpolation(overset, name),
     weightsPtr_(NULL)
 {}
 

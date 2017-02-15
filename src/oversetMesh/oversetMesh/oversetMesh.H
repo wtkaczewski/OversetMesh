@@ -189,8 +189,18 @@ private:
                 mutable List<labelField>* remoteDonorToLocalAcceptorAddrPtr_;
 
 
-            //- Overset interpolation
-            autoPtr<oversetInterpolation> interpolationPtr_;
+            //- Overset interpolation subdictionary
+            dictionary interpolationDict_;
+
+            //- List of names for active interpolation schemes
+            wordList interpolationNames_;
+
+            //- Hash table containing overset interpolation index for each
+            //  overset interpolation name (for easy access)
+            HashTable<label> interpolationIndices_;
+
+            //- Run-time selectable list of overset interpolations
+            PtrList<oversetInterpolation> interpolations_;
 
 
     // Private member functions
@@ -335,22 +345,27 @@ public:
                 const List<labelField>& remoteDonorToLocalAcceptorAddr() const;
 
 
-            //- Return interpolation
-            const oversetInterpolation& interpolation() const;
+            //- Return interpolation scheme given name of the field
+            const oversetInterpolation& interpolationScheme
+            (
+                const word& fieldName
+            ) const;
 
             //- Interpolate to acceptors
             template<class Type>
             void interpolate
             (
                 Field<Type>& accF,
-                const Field<Type>& cellField
+                const Field<Type>& cellField,
+                const word& fieldName
             ) const;
 
             //- Interpolate to acceptors
             template<class Type>
             tmp<Field<Type> > interpolate
             (
-                const Field<Type>& cellField
+                const Field<Type>& cellField,
+                const word& fieldName
             ) const;
 
 

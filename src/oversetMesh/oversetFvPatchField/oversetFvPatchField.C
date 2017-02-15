@@ -119,8 +119,16 @@ template<class Type>
 template<class Type2>
 void oversetFvPatchField<Type>::setAcceptorValues(Field<Type2>& f) const
 {
-    // Get acceptor values by interpolation
-    Field<Type2> accValues = oversetPatch_.overset().interpolate(f);
+    // Get acceptor values by interpolation. Note that we assume that the field
+    // we are operating on uses the same overset interpolation scheme as the
+    // field referred by this fvPatchField. This might be problematic for GFM
+    // interpolation schemes becayse f can be some arbitrary field depending on
+    // the linear solver that is used. VV, 15/Feb/2017.
+    Field<Type2> accValues = oversetPatch_.overset().interpolate
+    (
+        f,
+        this->dimensionedInternalField().name()
+    );
 
     // Get acceptor addressing
     const labelList& acceptors = oversetPatch_.overset().acceptorCells();
@@ -976,7 +984,7 @@ void oversetFvPatchField<Type>::manipulateMatrix
 
         // Get acceptor values by interpolation
         Field<Type> accValues =
-            oversetPatch_.overset().interpolate(eqn.psi());
+            oversetPatch_.overset().interpolate(eqn.psi(), eqn.psi().name());
 
         // Get acceptor addressing
         const labelList& accCells = oversetPatch_.overset().acceptorCells();

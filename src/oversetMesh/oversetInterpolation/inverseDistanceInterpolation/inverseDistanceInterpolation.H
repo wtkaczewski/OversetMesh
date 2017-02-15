@@ -97,7 +97,7 @@ public:
         inverseDistanceInterpolation
         (
             const oversetMesh& overset,
-            const dictionary& dict
+            const word& name
         );
 
 

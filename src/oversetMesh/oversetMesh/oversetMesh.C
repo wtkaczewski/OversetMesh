@@ -86,14 +86,13 @@ Foam::oversetMesh::oversetMesh(const fvMesh& mesh)
     mapPtr_(NULL),
     remoteDonorToLocalAcceptorAddrPtr_(NULL),
 
-    interpolationPtr_
+    interpolationDict_(dict_.subDict("interpolation")),
+    interpolationNames_
     (
-        oversetInterpolation::New
-        (
-            *this,
-            dict_.subDict("interpolation")
-        )
-    )
+        interpolationDict_.lookup("interpolationSchemes")
+    ),
+    interpolationIndices_(interpolationNames_.size()),
+    interpolations_()
 {
     Info << "Creating oversetMesh" << endl;
 
@@ -117,6 +116,24 @@ Foam::oversetMesh::oversetMesh(const fvMesh& mesh)
         );
     }
 
+    // Check for duplicate region names by inserting into hash set
+    {
+        HashSet<word> uniqueNames(regions_.size());
+
+        // If the insert fails, that means that we have a duplicate
+        forAll (regions_, regionI)
+        {
+            if (!uniqueNames.insert(regions_[regionI].name()))
+            {
+                FatalErrorIn("oversetMesh::oversetMesh(const fvMesh& mesh)")
+                  << "Overset region: " << regions_[regionI].name()
+                  << " specified more than once."
+                  << nl << "This is not allowed."
+                  << abort(FatalError);
+            }
+        }
+    }
+
     // Overset patch must come first for consistent handling of patch flux on
     // coupled boundaries (see oversetFvPatchField::patchFlux() member function)
     if (!isA<oversetPolyPatch>(mesh.boundaryMesh()[0]))
@@ -129,8 +146,35 @@ Foam::oversetMesh::oversetMesh(const fvMesh& mesh)
           << abort(FatalError);
     }
 
-    // Check for duplicate region names
-    // TODO: HJ
+    // Set overset interpolation schemes used in this simulation
+
+    // Loop through specified interpolation schemes and insert unique
+    // index for each interpolation schemes into the hash table (key = name of
+    // interpolation scheme, value = entry within the list)
+    forAll (interpolationNames_, intI)
+    {
+        interpolationIndices_.insert(interpolationNames_[intI], intI);
+    }
+
+    Info<< "Found " << interpolationIndices_.size()
+        << " active overset interpolation schemes. "
+        << nl << endl;
+
+    // Create all interpolation schemes specified in the dictionary
+    interpolations_.setSize(interpolationIndices_.size());
+
+    forAllConstIter (HashTable<label>, interpolationIndices_, iter)
+    {
+        interpolations_.set
+        (
+            iter(),
+            oversetInterpolation::New
+            (
+                *this,
+                iter.key()
+            )
+        );
+    }
 }
 
 
@@ -144,9 +188,40 @@ Foam::oversetMesh::~oversetMesh()
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
 
-const Foam::oversetInterpolation& Foam::oversetMesh::interpolation() const
+const Foam::oversetInterpolation& Foam::oversetMesh::interpolationScheme
+(
+    const word& fieldName
+) const
 {
-    return interpolationPtr_();
+    // Get name of the interpolation scheme for this field (or a default
+    // interpolation scheme)
+    word schemeName;
+
+    if (interpolationDict_.found(fieldName))
+    {
+        schemeName = word(interpolationDict_.lookup(fieldName));
+    }
+    else
+    {
+        schemeName = word(interpolationDict_.lookup("default"));
+    }
+
+    if (!interpolationIndices_.found(schemeName))
+    {
+        // Didn't find an entry neither as specified interpolation scheme nor as
+        // a default scheme, issue an error
+        FatalErrorIn
+        (
+            "const oversetInterpolation& oversetMesh::interpolationScheme"
+            "\n("
+            "\n    const fvMesh& mesh"
+            "\n) const"
+        ) << "Did not find overset interpolation scheme for field: "
+          << fieldName << " or a suitable default entry."
+          << abort(FatalError);
+    }
+
+    return interpolations_[interpolationIndices_[schemeName]];
 }
 
 
@@ -178,8 +253,7 @@ void Foam::oversetMesh::setRefCell
 
 bool Foam::oversetMesh::movePoints() const
 {
-    // Perform appropriate updates on search and fringe
-    // HJ, 3/Apr/2013
+    // Perform appropriate updates on search and fringe HJ, 3/Apr/2013
 
     // Get time index
     const label globalTimeIndex = mesh().time().timeIndex();
@@ -190,12 +264,17 @@ bool Foam::oversetMesh::movePoints() const
     {
         Info<< "Overset mesh motion update" << endl;
 
+        // Update regions
         forAll (regions_, regionI)
         {
             regions_[regionI].update();
         }
 
-        interpolationPtr_->update();
+        // Update active interpolation schemes
+        forAll (interpolations_, interI)
+        {
+            interpolations_[interI].update();
+        }
 
         clearOut();
 
@@ -214,17 +293,20 @@ bool Foam::oversetMesh::movePoints() const
 
 bool Foam::oversetMesh::updateMesh(const mapPolyMesh&) const
 {
-    // Perform appropriate updates on search and fringe
-    // HJ, 3/Apr/2013
+    // Perform appropriate updates on search and fringe HJ, 3/Apr/2013
     Info<< "Overset topo update" << endl;
 
+    // Update regions
     forAll (regions_, regionI)
     {
         regions_[regionI].update();
     }
 
-    // Update interpolation (recalculate weights)
-    interpolationPtr_->update();
+    // Update active interpolation schemes
+    forAll (interpolations_, interI)
+    {
+        interpolations_[interI].update();
+    }
 
     clearOut();
 

@@ -37,34 +37,30 @@ namespace Foam
 autoPtr<oversetInterpolation> oversetInterpolation::New
 (
     const oversetMesh& overset,
-    const dictionary& dict
+    const word& name
 )
 {
-    const word interpolationTypeName(dict.lookup("type"));
+    Info<< "Selecting overset interpolation type " << name  << endl;
 
-    Info<< "Selecting overset interpolation type "
-        << interpolationTypeName  << endl;
+    wordConstructorTable::iterator cstrIter =
+        wordConstructorTablePtr_->find(name);
 
-    dictionaryConstructorTable::iterator cstrIter =
-        dictionaryConstructorTablePtr_->find(interpolationTypeName);
-
-    if (cstrIter == dictionaryConstructorTablePtr_->end())
+    if (cstrIter == wordConstructorTablePtr_->end())
     {
-        FatalIOErrorIn
+        FatalErrorIn
         (
             "oversetInterpolation::New(\n"
             "    const oversetMesh& overset,\n"
-            "    const dictionary& dict\n"
-            ")",
-            dict
+            "    const word& name\n"
+            ")"
         )   << "Unknown oversetInterpolation type "
-            << interpolationTypeName << endl << endl
+            << name << endl << endl
             << "Valid oversetInterpolations are : " << endl
-            << dictionaryConstructorTablePtr_->toc()
+            << wordConstructorTablePtr_->toc()
             << exit(FatalIOError);
     }
 
-    return autoPtr<oversetInterpolation>(cstrIter()(overset, dict));
+    return autoPtr<oversetInterpolation>(cstrIter()(overset, name));
 }
 
 

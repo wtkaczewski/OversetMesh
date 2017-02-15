@@ -106,12 +106,12 @@ public:
         (
             autoPtr,
             oversetInterpolation,
-            dictionary,
+            word,
             (
                 const oversetMesh& overset,
-                const dictionary& dict
+                const word& name
             ),
-            (overset, dict)
+            (overset, name)
         );
 
 
@@ -121,7 +121,7 @@ public:
         static autoPtr<oversetInterpolation> New
         (
             const oversetMesh& overset,
-            const dictionary& dict
+            const word& name
         );
 
 
@@ -131,7 +131,7 @@ public:
         oversetInterpolation
         (
             const oversetMesh& overset,
-            const dictionary& dict
+            const word& name
         );
 
 

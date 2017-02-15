@@ -32,7 +32,7 @@ License
 namespace Foam
 {
     defineTypeNameAndDebug(oversetInterpolation, 0);
-    defineRunTimeSelectionTable(oversetInterpolation, dictionary);
+    defineRunTimeSelectionTable(oversetInterpolation, word);
 }
 
 
@@ -41,7 +41,7 @@ namespace Foam
 Foam::oversetInterpolation::oversetInterpolation
 (
     const oversetMesh& overset,
-    const dictionary& dict
+    const word& name
 )
 :
     overset_(overset)

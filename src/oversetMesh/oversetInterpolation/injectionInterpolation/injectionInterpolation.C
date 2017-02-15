@@ -38,7 +38,7 @@ namespace Foam
     (
         oversetInterpolation,
         injectionInterpolation,
-        dictionary
+        word
     );
 }
 
@@ -107,10 +107,10 @@ void Foam::injectionInterpolation::clearWeights() const
 Foam::injectionInterpolation::injectionInterpolation
 (
     const oversetMesh& overset,
-    const dictionary& dict
+    const word& name
 )
 :
-    oversetInterpolation(overset, dict),
+    oversetInterpolation(overset, name),
     weightsPtr_(NULL)
 {}
 

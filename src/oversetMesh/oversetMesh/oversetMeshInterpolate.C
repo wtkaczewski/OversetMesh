@@ -32,7 +32,8 @@ template<class Type>
 void Foam::oversetMesh::interpolate
 (
     Field<Type>& accF,
-    const Field<Type>& cellF
+    const Field<Type>& cellF,
+    const word& fieldName
 ) const
 {
     // Check sizes
@@ -71,10 +72,14 @@ void Foam::oversetMesh::interpolate
     const List<labelField>& remoteDAAddressing =
         remoteDonorToLocalAcceptorAddr();
 
+    // Get overset interpolation for this field
+    const oversetInterpolation& interpolation =
+        this->interpolationScheme(fieldName);
+
     // Get interpolation weights for all donors for a given local acceptor in a
     // given region
     const oversetInterpolation::ListScalarFieldField& weights =
-        interpolation().weights();
+        interpolation.weights();
 
     // Note: accF field indexed by number of acceptors (region-wise
     // incremental, see oversetMesh::calcCellClassification() for details)
@@ -142,13 +147,14 @@ void Foam::oversetMesh::interpolate
 template<class Type>
 Foam::tmp<Foam::Field<Type> > Foam::oversetMesh::interpolate
 (
-    const Field<Type>& cellF
+    const Field<Type>& cellF,
+    const word& fieldName
 ) const
 {
     tmp<Field<Type> > tresult(new Field<Type>(this->acceptorCells().size()));
     Field<Type>& result = tresult();
 
-    interpolate(result, cellF);
+    interpolate(result, cellF, fieldName);
 
     return tresult;
 }

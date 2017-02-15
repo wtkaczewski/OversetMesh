@@ -38,7 +38,7 @@ namespace Foam
     (
         oversetInterpolation,
         inverseDistanceInterpolation,
-        dictionary
+        word
     );
 }
 
@@ -129,10 +129,10 @@ void Foam::inverseDistanceInterpolation::clearWeights() const
 Foam::inverseDistanceInterpolation::inverseDistanceInterpolation
 (
     const oversetMesh& overset,
-    const dictionary& dict
+    const word& name
 )
 :
-    oversetInterpolation(overset, dict),
+    oversetInterpolation(overset, name),
     weightsPtr_(NULL)
 {}
 

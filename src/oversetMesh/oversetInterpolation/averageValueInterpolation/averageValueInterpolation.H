@@ -97,7 +97,7 @@ public:
         averageValueInterpolation
         (
             const oversetMesh& overset,
-            const dictionary& dict
+            const word& name
         );
 
 
