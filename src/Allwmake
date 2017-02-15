@@ -1,8 +1,6 @@
 #!/bin/sh
 set -x
 
-wmake oversetRegionIndex
-
 wmake libso oversetMesh
 wmake libso oversetDynamicFvMesh
 
@@ -16,3 +14,6 @@ wmake interOversetFoam
 wmake potentialDyMOversetFoam
 wmake icoDyMOversetFoam
 wmake pimpleDyMOversetFoam
+
+wmake oversetRegionIndex
+wmake calcOverset 
