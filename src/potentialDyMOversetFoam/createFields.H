@@ -60,5 +60,7 @@
     scalar pRefValue = 0.0;
     om.setRefCell(p, piso.dict(), pRefCell, pRefValue);
 
+    mesh.schemesDict().setFluxRequired(p.name());
+
     // Write overset masks
 #   include "writeOversetMasks.H"
