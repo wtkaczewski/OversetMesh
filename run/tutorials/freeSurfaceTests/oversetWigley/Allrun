@@ -7,11 +7,28 @@ application1="potentialOversetFoam"
 application2="interOversetFoam"
 
 \rm -rf 0
-cp -r save 0
+\cp -r save 0
+
+# Copy background mesh into constant/polyMesh
+\cp -rf meshes/background/constant/polyMesh constant/.
+
+# Merge meshes and clean up
+runApplication mergeMeshes .. oversetWigley . meshes/hull
+\rm -rf constant/polyMesh
+\mv 0.*/polyMesh constant
+\rm -rf 0.*
+\rm -f constant/polyMesh/pointZones constant/polyMesh/pointZones.gz constant/polyMesh/faceZones constant/polyMesh/faceZones.gz constant/polyMesh/cellZones constant/polyMesh/cellZones.gz
+
+# Create necessary sets and zones
 runApplication regionCellSets
 runApplication setsToZones
 runApplication setSet -batch setBatch.batch
 ( cd constant/polyMesh/sets/ ; \rm -f cellRegion0 cellRegion0.gz cellRegion1 cellRegion1.gz backFringe_old backFringe_old.gz backHole_old backHole_old.gz )
+
+# Copy boundary file with oversetFaces patch
+\cp boundary constant/polyMesh/boundary
+
+# Set alpha field for initial condition
 runApplication setFields
 
 #runApplication $application1

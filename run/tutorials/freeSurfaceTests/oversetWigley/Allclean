@@ -9,7 +9,6 @@ cleanTimeDirectories
 \rm -rf 0/cellDist 0/cellDist.gz constant/cellDecomposition 
 \rm -rf *.vtk
 \rm -rf VTK
-\rm -rf constant/polyMesh/sets
-#\cp -r sets constant/polyMesh/sets
+\rm -rf constant/polyMesh
 \rm -rf 0
 \cp -r save 0

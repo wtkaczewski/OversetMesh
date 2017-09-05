@@ -1,0 +1,5 @@
+#!/bin/sh
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+export OVERSET_LIB=${DIR%%/etc*}
